@@ -422,6 +422,7 @@
           ana+
           svc+
         '</div>'+
+        (h.switchport?'<div class="notes">🔌 '+esc(h.switchport)+'</div>':'')+
         (h.notes?'<div class="notes">📝 '+esc(h.notes)+'</div>':'')+
       '</div>'+
       '<div class="actions">'+
@@ -440,7 +441,8 @@
       '<label class="field"><span>Adresse</span><input type="text" data-f="addr" value="'+esc(h.addr||'')+'"></label>'+
       '<label class="field"><span>Port</span><input type="number" data-f="port" value="'+esc(h.port||'')+'" min="1" max="65535"></label>'+
       '<label class="field"><span>Protocole</span><select data-f="proto"><option value="http"'+(h.proto!=='https'?' selected':'')+'>http</option><option value="https"'+(h.proto==='https'?' selected':'')+'>https</option></select></label>'+
-      '<label class="field" style="flex:1 1 100%"><span>Notes (port du switch, emplacement, n° de série…)</span><input type="text" data-f="notes" value="'+esc(h.notes||'')+'" placeholder="ex. Switch SW-01 port Gi1/0/12 — local technique"></label>'+
+      '<label class="field" style="flex:1 1 48%"><span>Port de switch</span><input type="text" data-f="switchport" value="'+esc(h.switchport||'')+'" placeholder="ex. SW-01 · Gi1/0/12"></label>'+
+      '<label class="field" style="flex:1 1 100%"><span>Notes (emplacement, n° de série…)</span><input type="text" data-f="notes" value="'+esc(h.notes||'')+'" placeholder="ex. local technique — armoire B"></label>'+
       '<button class="primary" data-act="save">Enregistrer</button>'+
       '<button data-act="cancel">Annuler</button>'+
     '</div>';
@@ -546,6 +548,7 @@
       h.port=parseInt(card.querySelector('[data-f="port"]').value,10)||n.port||null;
       h.proto=card.querySelector('[data-f="proto"]').value;
       h.notes=card.querySelector('[data-f="notes"]').value.trim();
+      h.switchport=card.querySelector('[data-f="switchport"]').value.trim();
       h.favicon=null; h.services=null;
       saveHosts(); renderOne(h); checkHost(h,true);
     }
@@ -563,6 +566,7 @@
     var data=hosts.map(function(h){
       var o={label:h.label,addr:h.addr,port:h.port,proto:h.proto};
       if(h.notes) o.notes=h.notes;
+      if(h.switchport) o.switchport=h.switchport;
       if(h.server) o.server=h.server;
       if(h.title) o.title=h.title;
       if(h.detected) o.detected=h.detected;
@@ -585,14 +589,17 @@
       var port=x.port||n.port||null;
       var key=n.addr+'|'+(port||'');
       var h=idx[key];
-      var fields=['label','notes','server','title','detected'];
+      var autoFields=['server','title','detected','switchport'];
       if(h){
         if(x.proto) h.proto=x.proto;
-        fields.forEach(function(f){ if(x[f]!==undefined && x[f]!=='') h[f]=x[f]; });
+        if(x.label && !h.label) h.label=x.label;              // n'écrase pas un libellé saisi à la main
+        if(x.notes!==undefined && x.notes!=='' && !h.notes) h.notes=x.notes;
+        autoFields.forEach(function(f){ if(x[f]!==undefined && x[f]!=='') h[f]=x[f]; });
         updated++;
       }else{
         var nh={id:uid(), label:(x.label||'').trim(), addr:n.addr, port:port, proto:x.proto||'http', status:'', ms:null};
-        fields.forEach(function(f){ if(x[f]!==undefined && f!=='label') nh[f]=x[f]; });
+        if(x.notes) nh.notes=x.notes;
+        autoFields.forEach(function(f){ if(x[f]!==undefined) nh[f]=x[f]; });
         hosts.push(nh); idx[key]=nh; added++;
       }
     });
