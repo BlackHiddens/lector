@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surveillance IP</title>
+<meta name="description" content="Surveille une liste d'adresses IP : répondent ou non, indice de l'appareil derrière, et accès direct à leur page web.">
+<style>
+  :root{
+    --bg:#f4f6fb; --panel:#ffffff; --panel-2:#f8fafc; --border:#e2e8f0;
+    --text:#0f172a; --muted:#64748b; --muted-2:#94a3b8;
+    --accent:#2563eb; --accent-fg:#ffffff;
+    --up:#16a34a; --up-bg:#dcfce7; --down:#dc2626; --down-bg:#fee2e2;
+    --pending:#d97706; --pending-bg:#fef3c7; --unknown:#64748b; --unknown-bg:#e2e8f0;
+    --shadow:0 1px 2px rgba(15,23,42,.06), 0 4px 16px rgba(15,23,42,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0b1120; --panel:#111827; --panel-2:#0f172a; --border:#1f2a3c;
+      --text:#e5e7eb; --muted:#94a3b8; --muted-2:#64748b;
+      --accent:#3b82f6; --accent-fg:#ffffff;
+      --up:#22c55e; --up-bg:#052e1b; --down:#f87171; --down-bg:#3b0d0d;
+      --pending:#fbbf24; --pending-bg:#3a2a06; --unknown:#94a3b8; --unknown-bg:#1f2a3c;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b1120; --panel:#111827; --panel-2:#0f172a; --border:#1f2a3c;
+    --text:#e5e7eb; --muted:#94a3b8; --muted-2:#64748b;
+    --accent:#3b82f6; --accent-fg:#ffffff;
+    --up:#22c55e; --up-bg:#052e1b; --down:#f87171; --down-bg:#3b0d0d;
+    --pending:#fbbf24; --pending-bg:#3a2a06; --unknown:#94a3b8; --unknown-bg:#1f2a3c;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1040px; margin:0 auto; padding:24px 16px 64px}
+  header.top{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:18px}
+  h1{font-size:1.5rem; margin:0 0 4px; letter-spacing:-.01em}
+  .sub{color:var(--muted); margin:0; font-size:.92rem}
+  .theme-btn{background:var(--panel); color:var(--muted); border:1px solid var(--border); border-radius:10px; padding:8px 12px; cursor:pointer; font-size:.85rem}
+  .theme-btn:hover{color:var(--text)}
+
+  .stats{display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px}
+  .stat{flex:1 1 120px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; box-shadow:var(--shadow)}
+  .stat .n{font-size:1.6rem; font-weight:700; line-height:1}
+  .stat .l{font-size:.78rem; color:var(--muted); margin-top:4px; text-transform:uppercase; letter-spacing:.04em}
+  .stat.up .n{color:var(--up)} .stat.down .n{color:var(--down)}
+
+  .toolbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:12px; box-shadow:var(--shadow); margin-bottom:16px}
+  .toolbar .grow{flex:1 1 auto}
+  button, .btn{font-family:inherit; font-size:.88rem; border-radius:10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); padding:9px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; text-decoration:none; white-space:nowrap}
+  button:hover, .btn:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent); color:var(--accent-fg); border-color:var(--accent)}
+  button.primary:hover{filter:brightness(1.05)}
+  button:disabled{opacity:.55; cursor:not-allowed}
+  label.inline{display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.85rem}
+  select, input[type=number], input[type=text]{font-family:inherit; font-size:.88rem; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text)}
+  input:focus, select:focus, button:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+
+  .banner{background:var(--pending-bg); color:var(--text); border:1px solid var(--border); border-left:4px solid var(--pending); border-radius:10px; padding:10px 14px; margin-bottom:16px; font-size:.86rem}
+  .banner b{color:var(--pending)}
+
+  details.add{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:20px; overflow:hidden}
+  details.add>summary{cursor:pointer; padding:13px 16px; font-weight:600; list-style:none; user-select:none; display:flex; align-items:center; gap:8px}
+  details.add>summary::-webkit-details-marker{display:none}
+  details.add>summary::before{content:"＋"; color:var(--accent); font-weight:700}
+  details.add[open]>summary::before{content:"−"}
+  .add-body{padding:4px 16px 16px; border-top:1px solid var(--border)}
+  .form-grid{display:grid; grid-template-columns:1.4fr 1.6fr .7fr .9fr auto; gap:10px; align-items:end; margin-top:12px}
+  .field{display:flex; flex-direction:column; gap:5px}
+  .field span{font-size:.76rem; color:var(--muted); text-transform:uppercase; letter-spacing:.03em}
+  .field input, .field select{width:100%}
+  .bulk{margin-top:14px}
+  .bulk textarea{width:100%; min-height:76px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); resize:vertical}
+  .hint{font-size:.78rem; color:var(--muted-2); margin-top:6px}
+
+  .list{display:flex; flex-direction:column; gap:12px}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; display:flex; gap:14px; align-items:center; flex-wrap:wrap}
+  .card.is-down{border-color:color-mix(in srgb, var(--down) 40%, var(--border))}
+  .dot{width:12px; height:12px; border-radius:50%; flex:0 0 auto; background:var(--unknown)}
+  .dot.up{background:var(--up); box-shadow:0 0 0 4px var(--up-bg)}
+  .dot.down{background:var(--down); box-shadow:0 0 0 4px var(--down-bg)}
+  .dot.pending{background:var(--pending); box-shadow:0 0 0 4px var(--pending-bg); animation:pulse 1s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+
+  .favi{width:34px; height:34px; border-radius:8px; border:1px solid var(--border); background:var(--panel-2); object-fit:contain; padding:3px; flex:0 0 auto}
+  .favi.placeholder{display:flex; align-items:center; justify-content:center; color:var(--muted-2); font-size:1rem}
+
+  .main{flex:1 1 240px; min-width:200px}
+  .label-line{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .label{font-weight:600; font-size:1rem}
+  .label.empty{color:var(--muted-2); font-weight:500; font-style:italic}
+  .addr{color:var(--muted); font-size:.85rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .meta{display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; align-items:center}
+  .badge{font-size:.74rem; padding:3px 8px; border-radius:999px; background:var(--panel-2); border:1px solid var(--border); color:var(--muted)}
+  .badge.status{font-weight:600}
+  .badge.up{background:var(--up-bg); color:var(--up); border-color:transparent}
+  .badge.down{background:var(--down-bg); color:var(--down); border-color:transparent}
+  .badge.pending{background:var(--pending-bg); color:var(--pending); border-color:transparent}
+  .badge.svc{background:transparent; border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); color:var(--accent)}
+  .rt{font-size:.78rem; color:var(--muted-2); font-variant-numeric:tabular-nums}
+
+  .actions{display:flex; gap:7px; flex-wrap:wrap; align-items:center}
+  .actions .icon{padding:8px 10px}
+  .actions .open{background:var(--accent); color:var(--accent-fg); border-color:var(--accent)}
+
+  .edit-row{flex-basis:100%; display:none; gap:10px; flex-wrap:wrap; align-items:end; border-top:1px dashed var(--border); padding-top:12px; margin-top:2px}
+  .card.editing .edit-row{display:flex}
+  .edit-row .field{flex:1 1 140px}
+
+  .empty-state{text-align:center; color:var(--muted); padding:48px 16px; border:1px dashed var(--border); border-radius:var(--radius)}
+  footer{margin-top:32px; color:var(--muted-2); font-size:.8rem; border-top:1px solid var(--border); padding-top:16px}
+  footer ul{margin:8px 0 0; padding-left:18px}
+  footer li{margin:3px 0}
+  .row-flex{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  @media (max-width:640px){
+    .form-grid{grid-template-columns:1fr 1fr}
+    .stat .n{font-size:1.3rem}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Surveillance IP</h1>
+      <p class="sub">Vérifie si tes adresses répondent, devine ce qu'il y a derrière, et ouvre leur page web d'un clic.</p>
+    </div>
+    <button class="theme-btn" id="themeBtn" title="Changer de thème">◐ Thème</button>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="stTotal">0</div><div class="l">Adresses</div></div>
+    <div class="stat up"><div class="n" id="stUp">0</div><div class="l">Répondent</div></div>
+    <div class="stat down"><div class="n" id="stDown">0</div><div class="l">Sans réponse</div></div>
+    <div class="stat"><div class="n" id="stLast">—</div><div class="l">Dernier contrôle</div></div>
+  </div>
+
+  <div class="banner" id="httpsWarn" style="display:none">
+    <b>Attention :</b> cette page est ouverte en <code>https</code>. Les navigateurs bloquent alors les tests vers des appareils en <code>http</code> (contenu mixte). Pour surveiller ton réseau local, <b>enregistre ce fichier et ouvre-le en double-cliquant dessus</b> (fichier local).
+  </div>
+
+  <div class="toolbar">
+    <button class="primary" id="checkAll">⟳ Vérifier tout</button>
+    <label class="inline">Rafraîchir
+      <select id="refresh">
+        <option value="0">manuel</option>
+        <option value="15">15 s</option>
+        <option value="30" selected>30 s</option>
+        <option value="60">1 min</option>
+        <option value="300">5 min</option>
+      </select>
+    </label>
+    <label class="inline">Délai max
+      <select id="timeout">
+        <option value="1500">1,5 s</option>
+        <option value="3000" selected>3 s</option>
+        <option value="5000">5 s</option>
+        <option value="8000">8 s</option>
+      </select>
+    </label>
+    <span class="grow"></span>
+    <button id="exportBtn" title="Exporter la liste en JSON">⬇ Exporter</button>
+    <button id="importBtn" title="Importer une liste JSON">⬆ Importer</button>
+    <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+  </div>
+
+  <details class="add" id="addPanel">
+    <summary>Ajouter une adresse</summary>
+    <div class="add-body">
+      <form id="addForm" class="form-grid" autocomplete="off">
+        <label class="field"><span>Libellé</span><input type="text" id="fLabel" placeholder="ex. Caméra garage"></label>
+        <label class="field"><span>Adresse IP / hôte</span><input type="text" id="fAddr" placeholder="192.168.1.10" required></label>
+        <label class="field"><span>Port</span><input type="number" id="fPort" placeholder="80" min="1" max="65535"></label>
+        <label class="field"><span>Protocole</span>
+          <select id="fProto"><option value="http">http</option><option value="https">https</option></select>
+        </label>
+        <button class="primary" type="submit">Ajouter</button>
+      </form>
+
+      <div class="bulk">
+        <label class="field"><span>Ajout en lot (une ligne par appareil)</span>
+          <textarea id="bulk" placeholder="Libellé ; adresse ; port ; protocole&#10;Box internet ; 192.168.1.1&#10;NAS ; 192.168.1.20 ; 5000 ; https&#10;192.168.1.30:8080"></textarea>
+        </label>
+        <div class="row-flex" style="justify-content:space-between">
+          <span class="hint">Séparateurs acceptés : <code>;</code> <code>,</code> ou tabulation. Seule l'adresse est obligatoire.</span>
+          <button id="bulkAdd" type="button">Ajouter la liste</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <div class="list" id="list"></div>
+  <div class="empty-state" id="empty">Aucune adresse pour l'instant. Ouvre « <b>Ajouter une adresse</b> » ci-dessus, ou importe une liste.</div>
+
+  <footer>
+    <b>Comment ça marche &amp; limites (à lire une fois)</b>
+    <ul>
+      <li>Un navigateur ne peut pas faire de vrai <i>ping</i> (ICMP). Le test consiste à <b>ouvrir une connexion web</b> vers l'adresse : si l'appareil répond sur ce port, il est marqué « Répond ».</li>
+      <li>Un appareil <b>allumé mais sans page web</b> sur le port testé apparaîtra « Sans réponse ». Ajuste le port si besoin.</li>
+      <li>« Ce qu'il y a derrière » reste un <b>indice</b> : icône du site (favicon) de l'appareil + services web détectés (bouton <b>Analyser</b>). Le libellé que tu saisis reste la source la plus fiable.</li>
+      <li>Tout est enregistré dans <b>ton navigateur</b> (localStorage) — rien n'est envoyé sur Internet. Utilise Exporter pour une sauvegarde.</li>
+      <li>Pour surveiller un réseau local en <code>http</code>, ouvre ce fichier <b>en local</b> (double-clic), pas via une adresse <code>https</code>.</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var LS_HOSTS="ipwatch.hosts.v1", LS_SET="ipwatch.settings.v1";
+  var COMMON_PORTS=[80,443,8080,8443,8000,81,8081,5000,9000,7547];
+  var list=document.getElementById('list');
+  var empty=document.getElementById('empty');
+  var hosts=[];
+  var timer=null;
+
+  /* ---------- persistence ---------- */
+  function loadHosts(){
+    try{ var r=localStorage.getItem(LS_HOSTS); if(r) hosts=JSON.parse(r)||[]; }catch(e){ hosts=[]; }
+    if(!Array.isArray(hosts)) hosts=[];
+  }
+  function saveHosts(){ try{ localStorage.setItem(LS_HOSTS, JSON.stringify(hosts)); }catch(e){} }
+  function loadSet(){ try{ return JSON.parse(localStorage.getItem(LS_SET))||{}; }catch(e){ return {}; } }
+  function saveSet(o){ try{ localStorage.setItem(LS_SET, JSON.stringify(o)); }catch(e){} }
+
+  /* ---------- helpers ---------- */
+  function uid(){ return 'h'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function baseUrl(h){
+    var proto=h.proto||'http';
+    var addr=String(h.addr||'').trim();
+    var port=h.port? (':'+h.port) : '';
+    // If addr already carries a port, don't append another.
+    if(/:\d+$/.test(addr)) port='';
+    return proto+'://'+addr+port;
+  }
+  function normalizeAddr(raw){
+    var a=String(raw||'').trim();
+    a=a.replace(/^https?:\/\//i,'').replace(/\/.*$/,'');
+    var port=null;
+    var m=a.match(/^(.*):(\d+)$/);
+    if(m){ a=m[1]; port=parseInt(m[2],10); }
+    return {addr:a, port:port};
+  }
+
+  /* ---------- reachability probe ---------- */
+  function probe(url, timeoutMs){
+    return new Promise(function(resolve){
+      var done=false, start=performance.now();
+      var ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+      var t=setTimeout(function(){ if(done)return; done=true; if(ctrl)ctrl.abort(); resolve({up:false,ms:timeoutMs,reason:'timeout'}); }, timeoutMs);
+      var opts={mode:'no-cors', cache:'no-store'};
+      if(ctrl) opts.signal=ctrl.signal;
+      fetch(url, opts).then(function(){
+        if(done)return; done=true; clearTimeout(t);
+        resolve({up:true, ms:Math.round(performance.now()-start)});
+      }).catch(function(){
+        if(done)return; done=true; clearTimeout(t);
+        resolve({up:false, ms:Math.round(performance.now()-start), reason:'error'});
+      });
+    });
+  }
+
+  function timeout(){ return parseInt(document.getElementById('timeout').value,10)||3000; }
+
+  async function checkHost(h, render){
+    h.status='pending'; if(render) renderOne(h);
+    var res=await probe(baseUrl(h)+'/?_t='+Date.now(), timeout());
+    h.status = res.up ? 'up' : 'down';
+    h.ms = res.up ? res.ms : null;
+    h.checked = Date.now();
+    if(res.up) tryFavicon(h);
+    saveHosts(); if(render){ renderOne(h); updateStats(); }
+    return res.up;
+  }
+
+  function tryFavicon(h){
+    var img=new Image();
+    var url=baseUrl(h)+'/favicon.ico?_t='+Date.now();
+    var to=setTimeout(function(){ img.src=''; }, timeout());
+    img.onload=function(){ clearTimeout(to); if(img.width>0){ h.favicon=url; renderOne(h);} };
+    img.onerror=function(){ clearTimeout(to); };
+    img.src=url;
+  }
+
+  async function analyze(h){
+    var found=[]; h.analyzing=true; renderOne(h);
+    for(var i=0;i<COMMON_PORTS.length;i++){
+      var p=COMMON_PORTS[i];
+      var proto=(p===443||p===8443)?'https':'http';
+      var res=await probe(proto+'://'+h.addr+':'+p+'/?_t='+Date.now(), Math.min(timeout(),2500));
+      if(res.up) found.push(p);
+    }
+    h.services=found; h.analyzing=false; saveHosts(); renderOne(h);
+  }
+
+  async function checkAll(){
+    var btn=document.getElementById('checkAll'); btn.disabled=true; btn.textContent='… en cours';
+    hosts.forEach(function(h){ h.status='pending'; });
+    renderAll();
+    await Promise.all(hosts.map(function(h){ return checkHost(h,false); }));
+    renderAll(); updateStats();
+    setLast();
+    btn.disabled=false; btn.textContent='⟳ Vérifier tout';
+  }
+
+  function setLast(){
+    var d=new Date();
+    document.getElementById('stLast').textContent=d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  }
+
+  /* ---------- rendering ---------- */
+  function statusLabel(s){ return s==='up'?'Répond':s==='down'?'Sans réponse':s==='pending'?'Test…':'Non testé'; }
+
+  function cardHtml(h){
+    var url=baseUrl(h);
+    var favi = h.favicon
+      ? '<img class="favi" src="'+esc(h.favicon)+'" alt="" onerror="this.style.display=\'none\'">'
+      : '<div class="favi placeholder">🖥️</div>';
+    var svc = (h.services&&h.services.length)
+      ? h.services.map(function(p){return '<span class="badge svc">port '+p+'</span>';}).join('')
+      : '';
+    var rt = (h.status==='up'&&h.ms!=null) ? '<span class="rt">'+h.ms+' ms</span>' : '';
+    var labelHtml = h.label
+      ? '<span class="label">'+esc(h.label)+'</span>'
+      : '<span class="label empty">sans libellé</span>';
+    return ''+
+      '<span class="dot '+(h.status||'')+'"></span>'+
+      favi+
+      '<div class="main">'+
+        '<div class="label-line">'+labelHtml+' <span class="addr">'+esc(h.addr)+(h.port?':'+h.port:'')+'</span></div>'+
+        '<div class="meta">'+
+          '<span class="badge status '+(h.status||'')+'">'+statusLabel(h.status)+'</span>'+
+          rt+
+          (h.analyzing?'<span class="badge pending">analyse…</span>':'')+
+          svc+
+        '</div>'+
+      '</div>'+
+      '<div class="actions">'+
+        '<a class="btn open" href="'+esc(url)+'/" target="_blank" rel="noopener" title="Ouvrir la page web">↗ Ouvrir</a>'+
+        '<button class="icon" data-act="check" title="Vérifier">⟳</button>'+
+        '<button class="icon" data-act="analyze" title="Analyser les services web">🔍</button>'+
+        '<button class="icon" data-act="edit" title="Modifier">✎</button>'+
+        '<button class="icon" data-act="del" title="Supprimer">✕</button>'+
+      '</div>'+
+      editRowHtml(h);
+  }
+
+  function editRowHtml(h){
+    return '<div class="edit-row">'+
+      '<label class="field"><span>Libellé</span><input type="text" data-f="label" value="'+esc(h.label||'')+'" placeholder="ex. Imprimante bureau"></label>'+
+      '<label class="field"><span>Adresse</span><input type="text" data-f="addr" value="'+esc(h.addr||'')+'"></label>'+
+      '<label class="field"><span>Port</span><input type="number" data-f="port" value="'+esc(h.port||'')+'" min="1" max="65535"></label>'+
+      '<label class="field"><span>Protocole</span><select data-f="proto"><option value="http"'+(h.proto!=='https'?' selected':'')+'>http</option><option value="https"'+(h.proto==='https'?' selected':'')+'>https</option></select></label>'+
+      '<button class="primary" data-act="save">Enregistrer</button>'+
+      '<button data-act="cancel">Annuler</button>'+
+    '</div>';
+  }
+
+  function renderAll(){
+    empty.style.display = hosts.length ? 'none' : 'block';
+    list.innerHTML='';
+    hosts.forEach(function(h){
+      var el=document.createElement('div');
+      el.className='card'+(h.status==='down'?' is-down':'');
+      el.dataset.id=h.id;
+      el.innerHTML=cardHtml(h);
+      list.appendChild(el);
+    });
+    updateStats();
+  }
+
+  function renderOne(h){
+    var el=list.querySelector('.card[data-id="'+h.id+'"]');
+    if(!el){ renderAll(); return; }
+    var editing=el.classList.contains('editing');
+    el.className='card'+(h.status==='down'?' is-down':'')+(editing?' editing':'');
+    el.innerHTML=cardHtml(h);
+  }
+
+  function updateStats(){
+    var up=0,down=0;
+    hosts.forEach(function(h){ if(h.status==='up')up++; else if(h.status==='down')down++; });
+    document.getElementById('stTotal').textContent=hosts.length;
+    document.getElementById('stUp').textContent=up;
+    document.getElementById('stDown').textContent=down;
+  }
+
+  /* ---------- add / edit / delete ---------- */
+  function addHost(label,addr,port,proto){
+    var n=normalizeAddr(addr);
+    if(!n.addr) return false;
+    hosts.push({id:uid(), label:(label||'').trim(), addr:n.addr, port: port||n.port||null, proto:proto||'http', status:'', ms:null});
+    return true;
+  }
+
+  document.getElementById('addForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    var ok=addHost(fLabel.value, fAddr.value, parseInt(fPort.value,10)||null, fProto.value);
+    if(!ok){ fAddr.focus(); return; }
+    fLabel.value=''; fAddr.value=''; fPort.value='';
+    saveHosts(); renderAll();
+    var h=hosts[hosts.length-1]; checkHost(h,true);
+    fAddr.focus();
+  });
+
+  document.getElementById('bulkAdd').addEventListener('click',function(){
+    var lines=document.getElementById('bulk').value.split(/\r?\n/); var n=0;
+    lines.forEach(function(line){
+      line=line.trim(); if(!line) return;
+      var parts=line.split(/\s*[;,\t]\s*/);
+      var label,addr,port,proto;
+      if(parts.length===1){ addr=parts[0]; }
+      else { label=parts[0]; addr=parts[1]; port=parseInt(parts[2],10)||null; proto=/^https$/i.test(parts[3]||'')?'https':'http'; }
+      if(addHost(label,addr,port,proto)) n++;
+    });
+    document.getElementById('bulk').value='';
+    saveHosts(); renderAll();
+    if(n) checkAll();
+  });
+
+  list.addEventListener('click',function(e){
+    var btn=e.target.closest('[data-act]'); if(!btn) return;
+    var card=e.target.closest('.card'); if(!card) return;
+    var id=card.dataset.id; var h=hosts.find(function(x){return x.id===id;}); if(!h) return;
+    var act=btn.dataset.act;
+    if(act==='check'){ checkHost(h,true); }
+    else if(act==='analyze'){ analyze(h); }
+    else if(act==='del'){ hosts=hosts.filter(function(x){return x.id!==id;}); saveHosts(); renderAll(); }
+    else if(act==='edit'){ card.classList.add('editing'); var f=card.querySelector('[data-f="label"]'); if(f)f.focus(); }
+    else if(act==='cancel'){ card.classList.remove('editing'); renderOne(h); }
+    else if(act==='save'){
+      h.label=card.querySelector('[data-f="label"]').value.trim();
+      var n=normalizeAddr(card.querySelector('[data-f="addr"]').value);
+      h.addr=n.addr;
+      h.port=parseInt(card.querySelector('[data-f="port"]').value,10)||n.port||null;
+      h.proto=card.querySelector('[data-f="proto"]').value;
+      h.favicon=null; h.services=null;
+      saveHosts(); renderOne(h); checkHost(h,true);
+    }
+  });
+
+  // Enter key inside edit fields saves
+  list.addEventListener('keydown',function(e){
+    if(e.key!=='Enter') return;
+    var er=e.target.closest('.edit-row'); if(!er) return;
+    if(e.target.tagName==='INPUT'){ e.preventDefault(); var save=er.querySelector('[data-act="save"]'); if(save)save.click(); }
+  });
+
+  /* ---------- import / export ---------- */
+  document.getElementById('exportBtn').addEventListener('click',function(){
+    var data=hosts.map(function(h){return {label:h.label,addr:h.addr,port:h.port,proto:h.proto};});
+    var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='surveillance-ip.json'; a.click(); URL.revokeObjectURL(a.href);
+  });
+  document.getElementById('importBtn').addEventListener('click',function(){ document.getElementById('importFile').click(); });
+  document.getElementById('importFile').addEventListener('change',function(e){
+    var file=e.target.files[0]; if(!file) return;
+    var r=new FileReader();
+    r.onload=function(){
+      try{
+        var arr=JSON.parse(r.result); if(!Array.isArray(arr)) throw 0;
+        arr.forEach(function(x){ addHost(x.label,x.addr,x.port,x.proto); });
+        saveHosts(); renderAll(); checkAll();
+      }catch(err){ alert("Fichier JSON invalide."); }
+    };
+    r.readAsText(file); e.target.value='';
+  });
+
+  /* ---------- refresh timer ---------- */
+  function setupTimer(){
+    if(timer){ clearInterval(timer); timer=null; }
+    var s=parseInt(document.getElementById('refresh').value,10)||0;
+    if(s>0) timer=setInterval(function(){ if(hosts.length) checkAll(); }, s*1000);
+  }
+  document.getElementById('refresh').addEventListener('change',function(){
+    var st=loadSet(); st.refresh=this.value; saveSet(st); setupTimer();
+  });
+  document.getElementById('timeout').addEventListener('change',function(){
+    var st=loadSet(); st.timeout=this.value; saveSet(st);
+  });
+  document.getElementById('checkAll').addEventListener('click',checkAll);
+
+  /* ---------- theme ---------- */
+  document.getElementById('themeBtn').addEventListener('click',function(){
+    var cur=document.documentElement.getAttribute('data-theme');
+    var mqDark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var next = cur ? (cur==='dark'?'light':'dark') : (mqDark?'light':'dark');
+    document.documentElement.setAttribute('data-theme',next);
+    var st=loadSet(); st.theme=next; saveSet(st);
+  });
+
+  /* ---------- init ---------- */
+  function init(){
+    var st=loadSet();
+    if(st.theme) document.documentElement.setAttribute('data-theme',st.theme);
+    if(st.refresh) document.getElementById('refresh').value=st.refresh;
+    if(st.timeout) document.getElementById('timeout').value=st.timeout;
+    if(location.protocol==='https:') document.getElementById('httpsWarn').style.display='block';
+    loadHosts();
+    // migrate: ensure ids
+    hosts.forEach(function(h){ if(!h.id) h.id=uid(); });
+    renderAll();
+    setupTimer();
+    if(hosts.length){ document.getElementById('addPanel').open=false; checkAll(); }
+    else { document.getElementById('addPanel').open=true; }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
