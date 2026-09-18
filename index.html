@@ -367,13 +367,15 @@
     return res.up;
   }
 
-  var FAVI_SRCS=['/favicon.ico','/favicon.png','/apple-touch-icon.png','/apple-touch-icon-precomposed.png','/logo.png'];
+  var FAVI_SRCS=['/favicon.ico','/favicon.png','/favicon.gif','/apple-touch-icon.png','/apple-touch-icon-precomposed.png','/logo.png','/images/favicon.ico','/img/favicon.ico'];
   function tryFavicon(h){
     if(h.favicon) return;                       // déjà trouvée
     var base=baseUrl(h), i=0;
     (function next(){
       if(i>=FAVI_SRCS.length) return;
-      var url=base+FAVI_SRCS[i++]+'?_t='+Date.now();
+      // PAS de paramètre ?_t= : certains serveurs embarqués (uc-httpd...) ne
+      // servent que le chemin exact et rejettent toute query string.
+      var url=base+FAVI_SRCS[i++];
       var img=new Image();
       var to=setTimeout(function(){ img.onload=img.onerror=null; img.src=''; next(); }, Math.min(timeout(),2500));
       img.onload=function(){ clearTimeout(to); if(img.naturalWidth>0){ h.favicon=url; saveHosts(); renderOne(h);} else next(); };
