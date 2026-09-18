@@ -98,6 +98,7 @@
   .label{font-weight:600; font-size:1rem}
   .label.empty{color:var(--muted-2); font-weight:500; font-style:italic}
   .addr{color:var(--muted); font-size:.85rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .notes{margin-top:6px; font-size:.82rem; color:var(--muted); background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:5px 9px; display:inline-block; max-width:100%}
   .meta{display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; align-items:center}
   .badge{font-size:.74rem; padding:3px 8px; border-radius:999px; background:var(--panel-2); border:1px solid var(--border); color:var(--muted)}
   .badge.status{font-weight:600}
@@ -217,7 +218,9 @@
     <ul>
       <li>Un navigateur ne peut pas faire de vrai <i>ping</i> (ICMP). Le test consiste à <b>ouvrir une connexion web</b> vers l'adresse : si l'appareil répond sur ce port, il est marqué « Répond ».</li>
       <li>Un appareil <b>allumé mais sans page web</b> sur le port testé apparaîtra « Sans réponse ». Ajuste le port si besoin.</li>
-      <li>« Ce qu'il y a derrière » reste un <b>indice</b> : icône du site (favicon) de l'appareil + services web détectés (bouton <b>Analyser</b>). Le libellé que tu saisis reste la source la plus fiable.</li>
+      <li>« Ce qu'il y a derrière » : depuis le navigateur, on ne récupère qu'un <b>indice</b> (icône/favicon + ports web détectés via <b>Analyser</b>). Lire le <b>titre</b> de la page ou l'en-tête <code>Server</code> d'un autre appareil est <b>interdit au navigateur</b> (règle CORS).</li>
+      <li>Pour une <b>vraie</b> identification automatique (titre, en-tête <code>Server</code>, type de serveur embarqué), utilise l'<b>analyseur local</b> fourni à part : il génère un JSON que tu réinjectes ici via <b>Importer</b> (les libellés se remplissent tout seuls, sans doublon).</li>
+      <li>Champ <b>Notes</b> (bouton ✎) : pour tes infos manuelles — port du switch, emplacement, n° de série. Conservé à l'export/import.</li>
       <li>Tout est enregistré dans <b>ton navigateur</b> (localStorage) — rien n'est envoyé sur Internet. Utilise Exporter pour une sauvegarde.</li>
       <li>Pour surveiller un réseau local en <code>http</code>, ouvre ce fichier <b>en local</b> (double-clic), pas via une adresse <code>https</code>.</li>
     </ul>
@@ -399,6 +402,10 @@
     var svc = (h.services&&h.services.length)
       ? h.services.map(function(p){return '<span class="badge svc">port '+p+'</span>';}).join('')
       : '';
+    var ana='';
+    if(h.detected) ana+='<span class="badge svc" title="Type de serveur détecté">'+esc(h.detected)+'</span>';
+    if(h.server)   ana+='<span class="badge" title="En-tête HTTP Server">srv: '+esc(h.server)+'</span>';
+    if(h.title)    ana+='<span class="badge" title="Titre de la page web">« '+esc(h.title)+' »</span>';
     var rt = (h.status==='up'&&h.ms!=null) ? '<span class="rt">'+h.ms+' ms</span>' : '';
     var labelHtml = h.label
       ? '<span class="label">'+esc(h.label)+'</span>'
@@ -412,8 +419,10 @@
           '<span class="badge status '+(h.status||'')+'">'+statusLabel(h.status)+'</span>'+
           rt+
           (h.analyzing?'<span class="badge pending">analyse…</span>':'')+
+          ana+
           svc+
         '</div>'+
+        (h.notes?'<div class="notes">📝 '+esc(h.notes)+'</div>':'')+
       '</div>'+
       '<div class="actions">'+
         '<a class="btn open" href="'+esc(url)+'/" target="_blank" rel="noopener" title="Ouvrir la page web">↗ Ouvrir</a>'+
@@ -431,6 +440,7 @@
       '<label class="field"><span>Adresse</span><input type="text" data-f="addr" value="'+esc(h.addr||'')+'"></label>'+
       '<label class="field"><span>Port</span><input type="number" data-f="port" value="'+esc(h.port||'')+'" min="1" max="65535"></label>'+
       '<label class="field"><span>Protocole</span><select data-f="proto"><option value="http"'+(h.proto!=='https'?' selected':'')+'>http</option><option value="https"'+(h.proto==='https'?' selected':'')+'>https</option></select></label>'+
+      '<label class="field" style="flex:1 1 100%"><span>Notes (port du switch, emplacement, n° de série…)</span><input type="text" data-f="notes" value="'+esc(h.notes||'')+'" placeholder="ex. Switch SW-01 port Gi1/0/12 — local technique"></label>'+
       '<button class="primary" data-act="save">Enregistrer</button>'+
       '<button data-act="cancel">Annuler</button>'+
     '</div>';
@@ -535,6 +545,7 @@
       h.addr=n.addr;
       h.port=parseInt(card.querySelector('[data-f="port"]').value,10)||n.port||null;
       h.proto=card.querySelector('[data-f="proto"]').value;
+      h.notes=card.querySelector('[data-f="notes"]').value.trim();
       h.favicon=null; h.services=null;
       saveHosts(); renderOne(h); checkHost(h,true);
     }
@@ -549,11 +560,46 @@
 
   /* ---------- import / export ---------- */
   document.getElementById('exportBtn').addEventListener('click',function(){
-    var data=hosts.map(function(h){return {label:h.label,addr:h.addr,port:h.port,proto:h.proto};});
+    var data=hosts.map(function(h){
+      var o={label:h.label,addr:h.addr,port:h.port,proto:h.proto};
+      if(h.notes) o.notes=h.notes;
+      if(h.server) o.server=h.server;
+      if(h.title) o.title=h.title;
+      if(h.detected) o.detected=h.detected;
+      return o;
+    });
     var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
     a.download='surveillance-ip.json'; a.click(); URL.revokeObjectURL(a.href);
   });
+
+  // Fusionne une liste importée : met à jour les appareils existants (même adresse:port),
+  // ajoute les nouveaux. Ne duplique jamais. Sert aussi à réinjecter l'analyse locale.
+  function mergeImport(arr){
+    var idx={};
+    hosts.forEach(function(h){ idx[h.addr+'|'+(h.port||'')]=h; });
+    var added=0, updated=0;
+    arr.forEach(function(x){
+      if(!x||!x.addr) return;
+      var n=normalizeAddr(x.addr);
+      var port=x.port||n.port||null;
+      var key=n.addr+'|'+(port||'');
+      var h=idx[key];
+      var fields=['label','notes','server','title','detected'];
+      if(h){
+        if(x.proto) h.proto=x.proto;
+        fields.forEach(function(f){ if(x[f]!==undefined && x[f]!=='') h[f]=x[f]; });
+        updated++;
+      }else{
+        var nh={id:uid(), label:(x.label||'').trim(), addr:n.addr, port:port, proto:x.proto||'http', status:'', ms:null};
+        fields.forEach(function(f){ if(x[f]!==undefined && f!=='label') nh[f]=x[f]; });
+        hosts.push(nh); idx[key]=nh; added++;
+      }
+    });
+    saveHosts(); renderAll();
+    return {added:added, updated:updated};
+  }
+
   document.getElementById('importBtn').addEventListener('click',function(){ document.getElementById('importFile').click(); });
   document.getElementById('importFile').addEventListener('change',function(e){
     var file=e.target.files[0]; if(!file) return;
@@ -561,8 +607,9 @@
     r.onload=function(){
       try{
         var arr=JSON.parse(r.result); if(!Array.isArray(arr)) throw 0;
-        arr.forEach(function(x){ addHost(x.label,x.addr,x.port,x.proto); });
-        saveHosts(); renderAll(); checkAll();
+        var res=mergeImport(arr);
+        alert(res.added+' adresse(s) ajoutée(s), '+res.updated+' mise(s) à jour.');
+        if(res.added) checkAll();
       }catch(err){ alert("Fichier JSON invalide."); }
     };
     r.readAsText(file); e.target.value='';
