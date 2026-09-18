@@ -691,7 +691,25 @@ def do_snmp(switch_ips, discover_ranges, community, version, timeout, records):
             label = ("%s (%s)" % (data["name"], data["ip"])) if data["name"] else data["ip"]
             r["switchport"] = "%s · %s" % (label, name)
             found += 1
-    print("[SNMP] Port de switch trouve pour %d appareil(s)." % found, file=sys.stderr)
+    print("[SNMP] Port de switch trouve pour %d/%d appareil(s)." % (found, len(records)), file=sys.stderr)
+
+    # ---- Diagnostic : explique ce qui manque -------------------------------
+    no_mac = [r["addr"] for r in records if not arp.get(r["addr"])]
+    no_port = [r["addr"] for r in records if arp.get(r["addr"]) and "switchport" not in r]
+    if no_mac:
+        print("[SNMP] MAC introuvable (table ARP) pour %d adresse(s) : %s"
+              % (len(no_mac), ", ".join(no_mac[:8]) + (" ..." if len(no_mac) > 8 else "")),
+              file=sys.stderr)
+        print("[SNMP]   -> Lance le script depuis une machine du MEME sous-reseau que ces "
+              "modules, OU assure-toi qu'un switch L3 (routeur) est interroge/decouvert "
+              "(il fournit la table ARP).", file=sys.stderr)
+    if no_port:
+        print("[SNMP] MAC connue mais absente des tables de commutation pour %d adresse(s) : %s"
+              % (len(no_port), ", ".join(no_port[:8]) + (" ..." if len(no_port) > 8 else "")),
+              file=sys.stderr)
+        print("[SNMP]   -> Le switch d'acces de ces modules n'a pas ete interroge. Ajoute-le "
+              "avec --switch, ou elargis --discover a leur sous-reseau (ex: --discover "
+              "10.122.103.0/24).", file=sys.stderr)
 
 
 def parse_args():
