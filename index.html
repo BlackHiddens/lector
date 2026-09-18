@@ -84,6 +84,11 @@
   .list{display:flex; flex-direction:column; gap:12px}
   .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; display:flex; gap:14px; align-items:center; flex-wrap:wrap}
   .card.is-down{border-color:color-mix(in srgb, var(--down) 40%, var(--border))}
+  .card.dragging{opacity:.45}
+  .card.dragover{outline:2px dashed var(--accent); outline-offset:2px}
+  .grip{cursor:grab; color:var(--muted-2); font-size:1.15rem; line-height:1; padding:2px 2px; flex:0 0 auto; user-select:none}
+  .grip:active{cursor:grabbing}
+  .grip:hover{color:var(--text)}
   .dot{width:12px; height:12px; border-radius:50%; flex:0 0 auto; background:var(--unknown)}
   .dot.up{background:var(--up); box-shadow:0 0 0 4px var(--up-bg)}
   .dot.down{background:var(--down); box-shadow:0 0 0 4px var(--down-bg)}
@@ -170,6 +175,7 @@
       </select>
     </label>
     <span class="grow"></span>
+    <button class="primary" id="saveFile" title="Enregistrer un fichier .html autonome contenant TES données (partageable)">💾 Enregistrer</button>
     <button id="exportBtn" title="Exporter la liste en JSON">⬇ Exporter</button>
     <button id="importBtn" title="Importer une liste JSON">⬆ Importer</button>
     <input type="file" id="importFile" accept="application/json,.json" style="display:none">
@@ -222,6 +228,7 @@
       </select>
     </label>
     <span class="badge" id="filterCount" style="display:none"></span>
+    <button id="sortIp" title="Trier la liste par adresse IP">↕ Trier par IP</button>
     <button id="clearFilter" title="Effacer le filtre">✕ Effacer</button>
   </div>
 
@@ -237,11 +244,16 @@
       <li>Ce qui reste <b>impossible depuis le navigateur</b> (règle de sécurité CORS) : lire le <b>titre</b> de la page, l'en-tête <code>Server</code>, la <b>MAC</b> et le <b>port de switch</b>. Ces infos-là ne sont accessibles qu'avec l'<b>analyseur local</b> (ci-dessous).</li>
       <li>Pour une <b>vraie</b> identification automatique (titre, en-tête <code>Server</code>, type de serveur embarqué), utilise l'<b>analyseur local</b> fourni à part : il génère un JSON que tu réinjectes ici via <b>Importer</b> (les libellés se remplissent tout seuls, sans doublon).</li>
       <li>Champ <b>Notes</b> (bouton ✎) : pour tes infos manuelles — port du switch, emplacement, n° de série. Conservé à l'export/import.</li>
-      <li>Tout est enregistré dans <b>ton navigateur</b> (localStorage) — rien n'est envoyé sur Internet. Utilise Exporter pour une sauvegarde.</li>
+      <li><b>Enregistrer / partager</b> : le bouton <b>💾 Enregistrer</b> télécharge un fichier <code>.html</code> <b>autonome contenant tes données</b> (libellés, notes, ports de switch, ordre). Envoie ce fichier à un collègue : il l'ouvre déjà rempli. Une <b>*</b> sur le bouton = modifications non enregistrées.</li>
+      <li><b>Ordre</b> : glisse une ligne par la poignée <b>⠿</b> pour la déplacer. Par défaut la liste est triée par IP ; le bouton <b>↕ Trier par IP</b> réordonne à tout moment.</li>
+      <li>Pendant que tu travailles, l'app mémorise aussi dans <b>ton navigateur</b> (localStorage) — rien n'est envoyé sur Internet. Pour une copie sûre et partageable, utilise <b>💾 Enregistrer</b>.</li>
       <li>Pour surveiller un réseau local en <code>http</code>, ouvre ce fichier <b>en local</b> (double-clic), pas via une adresse <code>https</code>.</li>
     </ul>
   </footer>
 </div>
+
+<!-- Données enregistrées DANS le fichier par le bouton « Enregistrer ». Ne pas éditer à la main. -->
+<script id="seedData" type="application/json">[]</script>
 
 <script>
 (function(){
@@ -255,11 +267,36 @@
   var timer=null;
 
   /* ---------- persistence ---------- */
+  var dirty=false;
+  function readSeed(){
+    try{
+      var el=document.getElementById('seedData');
+      if(!el) return null;
+      var raw=JSON.parse(el.textContent||'[]');
+      if(Array.isArray(raw)) return {hosts:raw, manualOrder:false};
+      if(raw && Array.isArray(raw.hosts)) return {hosts:raw.hosts, manualOrder:!!raw.manualOrder};
+      return null;
+    }catch(e){ return null; }
+  }
   function loadHosts(){
-    try{ var r=localStorage.getItem(LS_HOSTS); if(r) hosts=JSON.parse(r)||[]; }catch(e){ hosts=[]; }
+    // 1) données de travail du navigateur (localStorage) si présentes,
+    // 2) sinon données embarquées dans le fichier (partagé/rouvert ailleurs).
+    var ls=null;
+    try{ var r=localStorage.getItem(LS_HOSTS); if(r) ls=JSON.parse(r); }catch(e){}
+    if(Array.isArray(ls) && ls.length){ hosts=ls; }
+    else{
+      var seed=readSeed();
+      if(seed && seed.hosts.length){
+        hosts=seed.hosts;
+        var st=loadSet();
+        if(st.manualOrder===undefined){ st.manualOrder=seed.manualOrder; saveSet(st); }  // hérite l'ordre du fichier
+      } else { hosts = Array.isArray(ls)?ls:[]; }
+    }
     if(!Array.isArray(hosts)) hosts=[];
   }
   function saveHosts(){ try{ localStorage.setItem(LS_HOSTS, JSON.stringify(hosts)); }catch(e){} }
+  function markDirty(){ if(!dirty){ dirty=true; var b=document.getElementById('saveFile'); if(b) b.textContent='💾 Enregistrer *'; } }
+  function markClean(){ dirty=false; var b=document.getElementById('saveFile'); if(b) b.textContent='💾 Enregistrer'; }
   function loadSet(){ try{ return JSON.parse(localStorage.getItem(LS_SET))||{}; }catch(e){ return {}; } }
   function saveSet(o){ try{ localStorage.setItem(LS_SET, JSON.stringify(o)); }catch(e){} }
 
@@ -476,6 +513,7 @@
       ? '<span class="label">'+esc(h.label)+'</span>'
       : '<span class="label empty">sans libellé</span>';
     return ''+
+      '<span class="grip" title="Glisser pour réordonner">⠿</span>'+
       '<span class="dot '+(h.status||'')+'"></span>'+
       favi+
       '<div class="main">'+
@@ -574,6 +612,7 @@
     var n=normalizeAddr(addr);
     if(!n.addr) return false;
     hosts.push({id:uid(), label:(label||'').trim(), addr:n.addr, port: port||n.port||null, proto:proto||'http', status:'', ms:null});
+    markDirty();
     return true;
   }
 
@@ -581,9 +620,10 @@
     e.preventDefault();
     var ok=addHost(fLabel.value, fAddr.value, parseInt(fPort.value,10)||null, fProto.value);
     if(!ok){ fAddr.focus(); return; }
+    var newH=hosts[hosts.length-1];
     fLabel.value=''; fAddr.value=''; fPort.value='';
-    saveHosts(); renderAll();
-    var h=hosts[hosts.length-1]; checkHost(h,true);
+    maybeSort(); saveHosts(); renderAll();
+    checkHost(newH,true);
     fAddr.focus();
   });
 
@@ -598,7 +638,7 @@
       if(addHost(label,addr,port,proto)) n++;
     });
     document.getElementById('bulk').value='';
-    saveHosts(); renderAll();
+    maybeSort(); saveHosts(); renderAll();
     if(n) checkAll();
   });
 
@@ -618,7 +658,8 @@
       added++;
     });
     document.getElementById('rangeStr').value='';
-    saveHosts(); renderAll();
+    if(added) markDirty();
+    maybeSort(); saveHosts(); renderAll();
     if(added) checkAll();
     else alert('Ces adresses sont déjà dans la liste.');
   });
@@ -630,7 +671,7 @@
     var act=btn.dataset.act;
     if(act==='check'){ checkHost(h,true); }
     else if(act==='analyze'){ analyze(h); }
-    else if(act==='del'){ hosts=hosts.filter(function(x){return x.id!==id;}); saveHosts(); renderAll(); }
+    else if(act==='del'){ hosts=hosts.filter(function(x){return x.id!==id;}); markDirty(); saveHosts(); renderAll(); }
     else if(act==='edit'){ card.classList.add('editing'); var f=card.querySelector('[data-f="label"]'); if(f)f.focus(); }
     else if(act==='cancel'){ card.classList.remove('editing'); renderOne(h); }
     else if(act==='save'){
@@ -642,7 +683,7 @@
       h.notes=card.querySelector('[data-f="notes"]').value.trim();
       h.switchport=card.querySelector('[data-f="switchport"]').value.trim();
       h.favicon=null; h.services=null;
-      saveHosts(); renderOne(h); checkHost(h,true);
+      markDirty(); saveHosts(); renderOne(h); checkHost(h,true);
     }
   });
 
@@ -651,6 +692,84 @@
     if(e.key!=='Enter') return;
     var er=e.target.closest('.edit-row'); if(!er) return;
     if(e.target.tagName==='INPUT'){ e.preventDefault(); var save=er.querySelector('[data-act="save"]'); if(save)save.click(); }
+  });
+
+  /* ---------- tri par IP ---------- */
+  function ipKey(h){
+    var m=/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(String(h.addr||'').replace(/:\d+$/,''));
+    if(!m) return Infinity;
+    return (((+m[1])*256 + (+m[2]))*256 + (+m[3]))*256 + (+m[4]);
+  }
+  function sortByIp(){
+    hosts.sort(function(a,b){
+      var ka=ipKey(a), kb=ipKey(b);
+      if(ka!==kb) return ka-kb;
+      return String(a.addr||'').localeCompare(String(b.addr||''));
+    });
+  }
+  function maybeSort(){ if(!loadSet().manualOrder) sortByIp(); }
+  document.getElementById('sortIp').addEventListener('click',function(){
+    var st=loadSet(); st.manualOrder=false; saveSet(st);
+    sortByIp(); markDirty(); saveHosts(); renderAll();
+  });
+
+  /* ---------- glisser-déposer (réordonner) ---------- */
+  var dragId=null;
+  function clearDragover(){ var els=list.querySelectorAll('.card.dragover'); for(var i=0;i<els.length;i++) els[i].classList.remove('dragover'); }
+  function endDrag(){ clearDragover(); var d=list.querySelector('.card.dragging'); if(d){ d.classList.remove('dragging'); d.draggable=false; } dragId=null; }
+  list.addEventListener('mousedown',function(e){
+    if(e.target.closest('.grip')){ var c=e.target.closest('.card'); if(c) c.draggable=true; }
+  });
+  list.addEventListener('dragstart',function(e){
+    var card=e.target.closest('.card'); if(!card){ return; }
+    dragId=card.dataset.id; card.classList.add('dragging');
+    if(e.dataTransfer){ e.dataTransfer.effectAllowed='move'; try{ e.dataTransfer.setData('text/plain',dragId); }catch(_){}}
+  });
+  list.addEventListener('dragover',function(e){
+    if(!dragId) return; e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect='move';
+    var card=e.target.closest('.card'); clearDragover();
+    if(card && card.dataset.id!==dragId) card.classList.add('dragover');
+  });
+  list.addEventListener('drop',function(e){
+    if(!dragId){ return; } e.preventDefault();
+    var card=e.target.closest('.card');
+    if(card && card.dataset.id!==dragId){
+      var from=-1,to=-1,i;
+      for(i=0;i<hosts.length;i++){ if(hosts[i].id===dragId)from=i; if(hosts[i].id===card.dataset.id)to=i; }
+      if(from>-1 && to>-1){
+        var rect=card.getBoundingClientRect();
+        var after = e.clientY > rect.top+rect.height/2;
+        var moved=hosts.splice(from,1)[0];
+        var idx=-1; for(i=0;i<hosts.length;i++){ if(hosts[i].id===card.dataset.id){ idx=i; break; } }
+        if(after) idx++;
+        hosts.splice(idx,0,moved);
+        var st=loadSet(); st.manualOrder=true; saveSet(st);
+        markDirty(); saveHosts(); renderAll();
+      }
+    }
+    endDrag();
+  });
+  list.addEventListener('dragend',function(){ endDrag(); });
+
+  /* ---------- Enregistrer dans le fichier (autonome, partageable) ---------- */
+  function saveFile(){
+    var clone=document.documentElement.cloneNode(true);
+    var seed=clone.querySelector('#seedData');
+    if(seed){
+      // </ échappé pour ne pas fermer la balise <script> par accident
+      seed.textContent=JSON.stringify({v:1, manualOrder:!!loadSet().manualOrder, hosts:hosts}).replace(/<\//g,'<\\/');
+    }
+    var l=clone.querySelector('#list'); if(l) l.innerHTML='';
+    var fi=clone.querySelector('#filter'); if(fi) fi.setAttribute('value','');
+    var html='<!DOCTYPE html>\n'+clone.outerHTML;
+    var blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='surveillance-ip.html'; a.click(); URL.revokeObjectURL(a.href);
+    markClean();
+  }
+  document.getElementById('saveFile').addEventListener('click',saveFile);
+  window.addEventListener('beforeunload',function(e){
+    if(dirty){ e.preventDefault(); e.returnValue=''; return ''; }
   });
 
   /* ---------- import / export ---------- */
@@ -695,7 +814,8 @@
         hosts.push(nh); idx[key]=nh; added++;
       }
     });
-    saveHosts(); renderAll();
+    if(added||updated) markDirty();
+    maybeSort(); saveHosts(); renderAll();
     return {added:added, updated:updated};
   }
 
@@ -767,6 +887,7 @@
     loadHosts();
     // migrate: ensure ids
     hosts.forEach(function(h){ if(!h.id) h.id=uid(); });
+    maybeSort();          // tri par IP par défaut (sauf ordre manuel)
     renderAll();
     setupTimer();
     if(hosts.length){ document.getElementById('addPanel').open=false; checkAll(); }
