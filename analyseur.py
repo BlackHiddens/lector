@@ -232,6 +232,9 @@ OID_IFNAME = "1.3.6.1.2.1.31.1.1.1.1"       # ifName
 OID_IFDESCR = "1.3.6.1.2.1.2.2.1.2"         # ifDescr
 OID_ARP = "1.3.6.1.2.1.4.22.1.2"            # ipNetToMediaPhysAddress
 OID_SYSNAME = "1.3.6.1.2.1.1.5"             # sysName
+OID_IFADMIN = "1.3.6.1.2.1.2.2.1.7"         # ifAdminStatus (1=up/active, 2=down/desactive)
+OID_IFOPER = "1.3.6.1.2.1.2.2.1.8"          # ifOperStatus  (1=up/lien present, 2=down)
+OID_IFTYPE = "1.3.6.1.2.1.2.2.1.3"          # ifType        (6 = ethernet)
 
 
 def _ber_len(n):
@@ -604,6 +607,50 @@ def read_switch(ip, community, version, timeout):
             "name": name, "portcount": portcount}
 
 
+def port_state(admin, oper):
+    """Interprete admin/oper -> etat lisible du port."""
+    if admin == 2:
+        return "Desactive (ferme)"
+    if admin == 1 and oper == 1:
+        return "Actif (lien up)"
+    if admin == 1:
+        return "Libre (active mais rien branche / lien down)"
+    return "Inconnu"
+
+
+def ports_for_switch(ip, community, version, timeout, data):
+    """Liste l'etat de chaque port ethernet d'un switch (ferme / libre / actif)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    target = (ip, 161)
+    try:
+        admin = _baseport_ifindex_map(snmp_walk(sock, target, community, OID_IFADMIN, version), OID_IFADMIN)
+        oper = _baseport_ifindex_map(snmp_walk(sock, target, community, OID_IFOPER, version), OID_IFOPER)
+        iftype = _baseport_ifindex_map(snmp_walk(sock, target, community, OID_IFTYPE, version), OID_IFTYPE)
+    finally:
+        sock.close()
+
+    nm, fdb, bp = data["nm"], data["fdb"], data["bp"]
+    maccount = {}
+    for mac, port in fdb.items():
+        ii = bp.get(port, port)
+        maccount[ii] = maccount.get(ii, 0) + 1
+
+    rows = []
+    for ii in sorted(set(list(admin) + list(oper) + list(nm))):
+        t = iftype.get(ii)
+        if t is not None and t != 6:      # garde uniquement les ports ethernet
+            continue
+        rows.append({
+            "switch": ip,
+            "switch_nom": data.get("name") or "",
+            "port": nm.get(ii, "ifIndex %d" % ii),
+            "etat": port_state(admin.get(ii), oper.get(ii)),
+            "appareils_appris": maccount.get(ii, 0),
+        })
+    return rows
+
+
 def discover_switches(candidates, community, version, timeout, workers=40):
     """Trouve les IP qui repondent en SNMP ET exposent une bridge-MIB (= switches)."""
     def probe(ip):
@@ -628,7 +675,7 @@ def discover_switches(candidates, community, version, timeout, workers=40):
     return found
 
 
-def do_snmp(switch_ips, discover_ranges, community, version, timeout, records):
+def do_snmp(switch_ips, discover_ranges, community, version, timeout, records, ports_out=None):
     prime_arp([r["addr"] for r in records])
     arp = local_arp()
 
@@ -711,6 +758,24 @@ def do_snmp(switch_ips, discover_ranges, community, version, timeout, records):
               "avec --switch, ou elargis --discover a leur sous-reseau (ex: --discover "
               "10.122.103.0/24).", file=sys.stderr)
 
+    # ---- Rapport d'etat des ports du/des switch(es) ------------------------
+    if ports_out:
+        allrows = []
+        for data in swdata:
+            try:
+                allrows += ports_for_switch(data["ip"], community, version, timeout, data)
+            except Exception as e:
+                print("[SNMP]   rapport ports impossible sur %s: %s" % (data["ip"], e), file=sys.stderr)
+        if allrows:
+            with open(ports_out, "w", encoding="utf-8") as f:
+                json.dump(allrows, f, ensure_ascii=False, indent=2)
+            print("\n=== Etat des ports de switch (%d port(s)) ===" % len(allrows))
+            print("  %-22s %-14s %-38s %s" % ("SWITCH", "PORT", "ETAT", "APPAREILS"))
+            for row in allrows:
+                sw = row["switch_nom"] and ("%s (%s)" % (row["switch_nom"], row["switch"])) or row["switch"]
+                print("  %-22s %-14s %-38s %s" % (sw[:22], str(row["port"])[:14], row["etat"], row["appareils_appris"]))
+            print("Rapport ecrit : %s" % ports_out)
+
 
 def parse_args():
     p = argparse.ArgumentParser(
@@ -738,6 +803,9 @@ def parse_args():
     p.add_argument("--community", default="public", help="Communaute SNMP en lecture (defaut: public).")
     p.add_argument("--snmp-version", choices=["1", "2c"], default="2c", help="Version SNMP (defaut: 2c).")
     p.add_argument("--snmp-timeout", type=float, default=2.0, help="Delai SNMP en secondes (defaut: 2).")
+    p.add_argument("--ports", nargs="?", const="ports.json", default=None,
+                   help="Produit aussi l'ETAT DE CHAQUE PORT du/des switch(es) : ferme (desactive), "
+                        "libre (rien branche) ou actif. Ecrit dans le fichier indique (defaut: ports.json).")
     return p.parse_args()
 
 
@@ -768,7 +836,8 @@ def main():
     if args.switch or args.discover:
         version = 1 if args.snmp_version == "2c" else 0
         try:
-            do_snmp(args.switch, args.discover, args.community, version, args.snmp_timeout, records)
+            do_snmp(args.switch, args.discover, args.community, version, args.snmp_timeout,
+                    records, ports_out=args.ports)
         except Exception as e:
             print("[SNMP] Erreur: %s (port de switch ignore)." % e, file=sys.stderr)
 

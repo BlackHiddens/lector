@@ -84,6 +84,31 @@ type / `Server` / titre / port de switch s'affichent sur chaque carte.
   MAC (via ARP), qui ne dit ni le switch ni le port. Le port est une donnée
   physique que seul le switch connaît. Switches non-managés → à faire à la main.
 
+### État des ports du switch (fermé / libre / actif)
+
+Pour savoir, port par port, si un port est **désactivé (fermé)**, **libre (rien
+branché / lien down)** ou **actif**, ajoute `--ports` :
+
+```bash
+python analyseur.py --discover 10.122.103.0/24 --community public --ports
+```
+
+Ça écrit `ports.json` (nom personnalisable : `--ports mon_rapport.json`) et
+affiche un tableau :
+
+```
+=== Etat des ports de switch ===
+  SWITCH                 PORT           ETAT                                   APPAREILS
+  SW-Test (10.122.103.1) Gi1/0/1        Actif (lien up)                        2
+  SW-Test (10.122.103.1) Gi1/0/2        Desactive (ferme)                      0
+  SW-Test (10.122.103.1) Gi1/0/3        Libre (active mais rien branche...)    0
+```
+
+- **Actif** : le port est activé et un lien est présent (câble + appareil).
+- **Désactivé (fermé)** : le port est administrativement coupé sur le switch.
+- **Libre** : le port est activé mais aucun lien (rien branché, ou appareil éteint).
+- « Appareils » = nombre d'adresses MAC apprises sur ce port.
+
 `python analyseur.py -h` affiche toutes les options.
 
 ## 3. `analyseur.ps1` — même chose en PowerShell (Windows, sans Python)
