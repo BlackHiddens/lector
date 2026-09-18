@@ -671,7 +671,10 @@
     var act=btn.dataset.act;
     if(act==='check'){ checkHost(h,true); }
     else if(act==='analyze'){ analyze(h); }
-    else if(act==='del'){ hosts=hosts.filter(function(x){return x.id!==id;}); markDirty(); saveHosts(); renderAll(); }
+    else if(act==='del'){
+      if(!confirm('Supprimer « '+(h.label||h.addr)+' » ?')) return;
+      hosts=hosts.filter(function(x){return x.id!==id;}); markDirty(); saveHosts(); renderAll();
+    }
     else if(act==='edit'){ card.classList.add('editing'); var f=card.querySelector('[data-f="label"]'); if(f)f.focus(); }
     else if(act==='cancel'){ card.classList.remove('editing'); renderOne(h); }
     else if(act==='save'){
@@ -683,6 +686,7 @@
       h.notes=card.querySelector('[data-f="notes"]').value.trim();
       h.switchport=card.querySelector('[data-f="switchport"]').value.trim();
       h.favicon=null; h.services=null;
+      card.classList.remove('editing');            // referme la ligne après enregistrement
       markDirty(); saveHosts(); renderOne(h); checkHost(h,true);
     }
   });
