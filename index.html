@@ -210,6 +210,19 @@
     </div>
   </details>
 
+  <div class="toolbar" id="filterBar">
+    <input type="text" id="filter" class="grow" placeholder="🔎 Filtrer par IP, libellé, notes, port de switch…" style="flex:1 1 240px">
+    <label class="inline">Statut
+      <select id="statusFilter">
+        <option value="">tous</option>
+        <option value="up">répond</option>
+        <option value="down">sans réponse</option>
+      </select>
+    </label>
+    <span class="badge" id="filterCount" style="display:none"></span>
+    <button id="clearFilter" title="Effacer le filtre">✕ Effacer</button>
+  </div>
+
   <div class="list" id="list"></div>
   <div class="empty-state" id="empty">Aucune adresse pour l'instant. Ouvre « <b>Ajouter une adresse</b> » ci-dessus, ou importe une liste.</div>
 
@@ -448,22 +461,47 @@
     '</div>';
   }
 
+  var filterText='', filterStatus='', EMPTY_DEFAULT='';
+
+  function matchesFilter(h){
+    if(filterStatus && h.status!==filterStatus) return false;
+    if(filterText){
+      var hay=[h.addr, h.port, h.label, h.notes, h.switchport, h.server, h.title, h.detected]
+        .filter(Boolean).join(' ').toLowerCase();
+      if(hay.indexOf(filterText)===-1) return false;
+    }
+    return true;
+  }
+
+  function updateEmpty(){
+    if(hosts.length===0){ empty.style.display='block'; empty.innerHTML=EMPTY_DEFAULT; return; }
+    var visible=list.querySelectorAll('.card').length;
+    var fc=document.getElementById('filterCount');
+    var filtering = !!(filterText || filterStatus);
+    if(filtering){ fc.style.display=''; fc.textContent=visible+' / '+hosts.length; }
+    else{ fc.style.display='none'; }
+    if(visible===0){ empty.style.display='block'; empty.textContent='Aucun résultat pour ce filtre.'; }
+    else{ empty.style.display='none'; }
+  }
+
   function renderAll(){
-    empty.style.display = hosts.length ? 'none' : 'block';
     list.innerHTML='';
     hosts.forEach(function(h){
+      if(!matchesFilter(h)) return;
       var el=document.createElement('div');
       el.className='card'+(h.status==='down'?' is-down':'');
       el.dataset.id=h.id;
       el.innerHTML=cardHtml(h);
       list.appendChild(el);
     });
+    updateEmpty();
     updateStats();
   }
 
   function renderOne(h){
     var el=list.querySelector('.card[data-id="'+h.id+'"]');
-    if(!el){ renderAll(); return; }
+    if(!el){ return; }                 // pas affiche (filtre) : renderAll s'en charge
+    if(!matchesFilter(h)){ el.remove(); updateEmpty(); updateStats(); return; }
     var editing=el.classList.contains('editing');
     el.className='card'+(h.status==='down'?' is-down':'')+(editing?' editing':'');
     el.innerHTML=cardHtml(h);
@@ -636,6 +674,20 @@
   });
   document.getElementById('checkAll').addEventListener('click',checkAll);
 
+  /* ---------- filtre ---------- */
+  document.getElementById('filter').addEventListener('input',function(){
+    filterText=this.value.trim().toLowerCase(); renderAll();
+  });
+  document.getElementById('statusFilter').addEventListener('change',function(){
+    filterStatus=this.value; renderAll();
+  });
+  document.getElementById('clearFilter').addEventListener('click',function(){
+    filterText=''; filterStatus='';
+    document.getElementById('filter').value='';
+    document.getElementById('statusFilter').value='';
+    renderAll();
+  });
+
   /* ---------- theme ---------- */
   document.getElementById('themeBtn').addEventListener('click',function(){
     var cur=document.documentElement.getAttribute('data-theme');
@@ -647,6 +699,7 @@
 
   /* ---------- init ---------- */
   function init(){
+    EMPTY_DEFAULT=empty.innerHTML;
     var st=loadSet();
     if(st.theme) document.documentElement.setAttribute('data-theme',st.theme);
     if(st.refresh) document.getElementById('refresh').value=st.refresh;
