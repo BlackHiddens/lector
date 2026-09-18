@@ -150,6 +150,8 @@
 
   <div class="toolbar">
     <button class="primary" id="checkAll">⟳ Vérifier tout</button>
+    <button id="scanAll" title="Sonder les ports/services web de tous les appareils qui répondent">🔍 Analyser tout</button>
+    <label class="inline" title="Sonder automatiquement les services après chaque vérification"><input type="checkbox" id="autoscan"> sonde auto</label>
     <label class="inline">Rafraîchir
       <select id="refresh">
         <option value="0">manuel</option>
@@ -231,7 +233,8 @@
     <ul>
       <li>Un navigateur ne peut pas faire de vrai <i>ping</i> (ICMP). Le test consiste à <b>ouvrir une connexion web</b> vers l'adresse : si l'appareil répond sur ce port, il est marqué « Répond ».</li>
       <li>Un appareil <b>allumé mais sans page web</b> sur le port testé apparaîtra « Sans réponse ». Ajuste le port si besoin.</li>
-      <li>« Ce qu'il y a derrière » : depuis le navigateur, on ne récupère qu'un <b>indice</b> (icône/favicon + ports web détectés via <b>Analyser</b>). Lire le <b>titre</b> de la page ou l'en-tête <code>Server</code> d'un autre appareil est <b>interdit au navigateur</b> (règle CORS).</li>
+      <li>Ce que l'app récupère <b>toute seule</b> (maximum autorisé au navigateur) : statut, <b>latence</b> (dernière + moyenne), <b>disponibilité %</b>, <b>dernière fois vu</b>, <b>icône/favicon</b>, et les <b>services web</b> ouverts (ports http/https) via <b>Analyser tout</b> ou la case <b>sonde auto</b>.</li>
+      <li>Ce qui reste <b>impossible depuis le navigateur</b> (règle de sécurité CORS) : lire le <b>titre</b> de la page, l'en-tête <code>Server</code>, la <b>MAC</b> et le <b>port de switch</b>. Ces infos-là ne sont accessibles qu'avec l'<b>analyseur local</b> (ci-dessous).</li>
       <li>Pour une <b>vraie</b> identification automatique (titre, en-tête <code>Server</code>, type de serveur embarqué), utilise l'<b>analyseur local</b> fourni à part : il génère un JSON que tu réinjectes ici via <b>Importer</b> (les libellés se remplissent tout seuls, sans doublon).</li>
       <li>Champ <b>Notes</b> (bouton ✎) : pour tes infos manuelles — port du switch, emplacement, n° de série. Conservé à l'export/import.</li>
       <li>Tout est enregistré dans <b>ton navigateur</b> (localStorage) — rien n'est envoyé sur Internet. Utilise Exporter pour une sauvegarde.</li>
@@ -244,7 +247,8 @@
 (function(){
   "use strict";
   var LS_HOSTS="ipwatch.hosts.v1", LS_SET="ipwatch.settings.v1";
-  var COMMON_PORTS=[80,443,8080,8443,8000,81,8081,5000,9000,7547];
+  var COMMON_PORTS=[80,443,8080,8443,8000,8008,8888,81,88,591,7547,9000,10000,5000,8181];
+  var HTTPS_PORTS={443:1,8443:1,10000:1};
   var list=document.getElementById('list');
   var empty=document.getElementById('empty');
   var hosts=[];
@@ -352,29 +356,60 @@
     h.status = res.up ? 'up' : 'down';
     h.ms = res.up ? res.ms : null;
     h.checked = Date.now();
-    if(res.up) tryFavicon(h);
+    h.checks = (h.checks||0)+1;               // total de contrôles
+    if(res.up){
+      h.ups = (h.ups||0)+1;                    // contrôles réussis
+      h.lastUp = Date.now();                   // dernière réponse
+      h.samples = (h.samples||[]).concat(res.ms).slice(-20);  // historique latence
+      tryFavicon(h);
+    }
     saveHosts(); if(render){ renderOne(h); updateStats(); }
     return res.up;
   }
 
+  var FAVI_SRCS=['/favicon.ico','/favicon.png','/apple-touch-icon.png','/apple-touch-icon-precomposed.png','/logo.png'];
   function tryFavicon(h){
-    var img=new Image();
-    var url=baseUrl(h)+'/favicon.ico?_t='+Date.now();
-    var to=setTimeout(function(){ img.src=''; }, timeout());
-    img.onload=function(){ clearTimeout(to); if(img.width>0){ h.favicon=url; renderOne(h);} };
-    img.onerror=function(){ clearTimeout(to); };
-    img.src=url;
+    if(h.favicon) return;                       // déjà trouvée
+    var base=baseUrl(h), i=0;
+    (function next(){
+      if(i>=FAVI_SRCS.length) return;
+      var url=base+FAVI_SRCS[i++]+'?_t='+Date.now();
+      var img=new Image();
+      var to=setTimeout(function(){ img.onload=img.onerror=null; img.src=''; next(); }, Math.min(timeout(),2500));
+      img.onload=function(){ clearTimeout(to); if(img.naturalWidth>0){ h.favicon=url; saveHosts(); renderOne(h);} else next(); };
+      img.onerror=function(){ clearTimeout(to); next(); };
+      img.src=url;
+    })();
   }
 
+  // Sonde les ports web courants -> liste "proto:port" des services qui répondent.
   async function analyze(h){
     var found=[]; h.analyzing=true; renderOne(h);
     for(var i=0;i<COMMON_PORTS.length;i++){
       var p=COMMON_PORTS[i];
-      var proto=(p===443||p===8443)?'https':'http';
-      var res=await probe(proto+'://'+h.addr+':'+p+'/?_t='+Date.now(), Math.min(timeout(),2500));
-      if(res.up) found.push(p);
+      var proto=HTTPS_PORTS[p]?'https':'http';
+      var res=await probe(proto+'://'+h.addr+':'+p+'/?_t='+Date.now(), Math.min(timeout(),2000));
+      if(res.up) found.push(proto+':'+p);
     }
-    h.services=found; h.analyzing=false; saveHosts(); renderOne(h);
+    h.services=found; h.analyzed=Date.now(); h.analyzing=false; saveHosts(); renderOne(h);
+  }
+
+  async function scanAll(){
+    var btn=document.getElementById('scanAll'); btn.disabled=true; var t=btn.textContent;
+    var ups=hosts.filter(function(h){return h.status==='up';});
+    await runPool(ups, function(h){ return analyze(h); }, 6);
+    btn.disabled=false; btn.textContent=t;
+  }
+
+  /* stats d'affichage */
+  function avgMs(a){ if(!a||!a.length) return null; for(var s=0,i=0;i<a.length;i++)s+=a[i]; return Math.round(s/a.length); }
+  function since(ts){
+    if(!ts) return '';
+    var d=Math.floor((Date.now()-ts)/1000);
+    if(d<60) return 'il y a '+d+' s';
+    if(d<3600) return 'il y a '+Math.floor(d/60)+' min';
+    if(d<86400) return 'il y a '+Math.floor(d/3600)+' h';
+    return 'il y a '+Math.floor(d/86400)+' j';
   }
 
   // Exécute worker() sur chaque élément avec au plus `size` en parallèle.
@@ -395,6 +430,11 @@
       await checkHost(h,true);
       done++; btn.textContent = done<total ? ('… '+done+'/'+total) : '⟳ Vérifier tout';
     }, 14);
+    if(document.getElementById('autoscan').checked){
+      btn.textContent='… analyse services';
+      var ups=hosts.filter(function(h){return h.status==='up';});
+      await runPool(ups, function(h){ return analyze(h); }, 6);
+    }
     updateStats(); setLast();
     btn.disabled=false; btn.textContent='⟳ Vérifier tout';
   }
@@ -413,13 +453,23 @@
       ? '<img class="favi" src="'+esc(h.favicon)+'" alt="" onerror="this.style.display=\'none\'">'
       : '<div class="favi placeholder">🖥️</div>';
     var svc = (h.services&&h.services.length)
-      ? h.services.map(function(p){return '<span class="badge svc">port '+p+'</span>';}).join('')
+      ? h.services.map(function(x){
+          var pp=String(x).split(':'); var pr=pp.length===2?pp[0]:'http'; var pn=pp.length===2?pp[1]:pp[0];
+          return '<span class="badge svc" title="Service web détecté">'+(pr==='https'?'🔒 ':'')+'port '+esc(pn)+'</span>';
+        }).join('')
       : '';
     var ana='';
     if(h.detected) ana+='<span class="badge svc" title="Type de serveur détecté">'+esc(h.detected)+'</span>';
     if(h.server)   ana+='<span class="badge" title="En-tête HTTP Server">srv: '+esc(h.server)+'</span>';
     if(h.title)    ana+='<span class="badge" title="Titre de la page web">« '+esc(h.title)+' »</span>';
-    var rt = (h.status==='up'&&h.ms!=null) ? '<span class="rt">'+h.ms+' ms</span>' : '';
+    var rtParts=[];
+    if(h.status==='up'&&h.ms!=null){
+      rtParts.push(h.ms+' ms');
+      var a=avgMs(h.samples); if(a!=null && h.samples && h.samples.length>1) rtParts.push('moy '+a);
+    }
+    var rt = rtParts.length ? '<span class="rt">'+rtParts.join(' · ')+'</span>' : '';
+    var avail = h.checks ? '<span class="badge" title="Disponibilité sur '+h.checks+' contrôle(s)">dispo '+Math.round((h.ups||0)/h.checks*100)+'%</span>' : '';
+    var seen = (h.status==='down'&&h.lastUp) ? '<span class="badge" title="Dernière réponse">vu '+since(h.lastUp)+'</span>' : '';
     var labelHtml = h.label
       ? '<span class="label">'+esc(h.label)+'</span>'
       : '<span class="label empty">sans libellé</span>';
@@ -431,6 +481,8 @@
         '<div class="meta">'+
           '<span class="badge status '+(h.status||'')+'">'+statusLabel(h.status)+'</span>'+
           rt+
+          seen+
+          avail+
           (h.analyzing?'<span class="badge pending">analyse…</span>':'')+
           ana+
           svc+
@@ -673,6 +725,10 @@
     var st=loadSet(); st.timeout=this.value; saveSet(st);
   });
   document.getElementById('checkAll').addEventListener('click',checkAll);
+  document.getElementById('scanAll').addEventListener('click',scanAll);
+  document.getElementById('autoscan').addEventListener('change',function(){
+    var st=loadSet(); st.autoscan=this.checked; saveSet(st);
+  });
 
   /* ---------- filtre ---------- */
   document.getElementById('filter').addEventListener('input',function(){
@@ -704,6 +760,7 @@
     if(st.theme) document.documentElement.setAttribute('data-theme',st.theme);
     if(st.refresh) document.getElementById('refresh').value=st.refresh;
     if(st.timeout) document.getElementById('timeout').value=st.timeout;
+    if(st.autoscan) document.getElementById('autoscan').checked=true;
     if(location.protocol==='https:') document.getElementById('httpsWarn').style.display='block';
     loadHosts();
     // migrate: ensure ids
