@@ -35,6 +35,11 @@ EXEMPLES
   python analyseur.py --in surveillance-ip.json --out analyse.json \\
          --switch 192.168.1.2 --community public
 
+  # SANS connaitre l'IP du switch : on scanne le reseau, l'outil trouve les
+  # switches SNMP tout seul et donne switch + port pour chaque module :
+  python analyseur.py --in surveillance-ip.json --out analyse.json \\
+         --discover 192.168.1.0/24 --community public
+
 Ensuite : dans l'app -> "Importer" -> choisis analyse.json.
 Les libelles vides se remplissent, sans doublon ; le type/serveur/titre et le
 port de switch s'affichent sur chaque carte.
@@ -226,6 +231,7 @@ OID_BASEPORT_IFINDEX = "1.3.6.1.2.1.17.1.4.1.2"  # dot1dBasePortIfIndex
 OID_IFNAME = "1.3.6.1.2.1.31.1.1.1.1"       # ifName
 OID_IFDESCR = "1.3.6.1.2.1.2.2.1.2"         # ifDescr
 OID_ARP = "1.3.6.1.2.1.4.22.1.2"            # ipNetToMediaPhysAddress
+OID_SYSNAME = "1.3.6.1.2.1.1.5"             # sysName
 
 
 def _ber_len(n):
@@ -357,11 +363,11 @@ def _snmp_getnext(sock, target, community, oid, version=1, retries=2):
     return None
 
 
-def snmp_walk(sock, target, community, base, version=1, limit=60000):
+def snmp_walk(sock, target, community, base, version=1, limit=60000, retries=2):
     res = []
     cur = base
     while True:
-        r = _snmp_getnext(sock, target, community, cur, version)
+        r = _snmp_getnext(sock, target, community, cur, version, retries=retries)
         if r is None:
             break
         oid, tag, val = r
@@ -564,32 +570,103 @@ def expand_range(s):
     return [s]
 
 
-def do_snmp(switch, community, version, timeout, records):
-    print("[SNMP] Interrogation du switch %s ..." % switch, file=sys.stderr)
-    prime_arp([r["addr"] for r in records])
-    arp = local_arp()
-
+def read_switch(ip, community, version, timeout):
+    """Lit un switch en SNMP. Renvoie un dict, ou None si ce n'est pas un bridge."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
-    target = (switch, 161)
+    target = (ip, 161)
     try:
-        q_fdb = _fdb_map(snmp_walk(sock, target, community, OID_Q_FDB, version), OID_Q_FDB, True)
-        d_fdb = _fdb_map(snmp_walk(sock, target, community, OID_D_FDB, version), OID_D_FDB, False)
-        bp2if = _baseport_ifindex_map(snmp_walk(sock, target, community, OID_BASEPORT_IFINDEX, version), OID_BASEPORT_IFINDEX)
-        if2name = _ifname_map(snmp_walk(sock, target, community, OID_IFNAME, version), OID_IFNAME)
-        if not if2name:
-            if2name = _ifname_map(snmp_walk(sock, target, community, OID_IFDESCR, version), OID_IFDESCR)
+        q = _fdb_map(snmp_walk(sock, target, community, OID_Q_FDB, version), OID_Q_FDB, True)
+        d = _fdb_map(snmp_walk(sock, target, community, OID_D_FDB, version), OID_D_FDB, False)
+        if not (q or d):
+            return None
+        bp = _baseport_ifindex_map(snmp_walk(sock, target, community, OID_BASEPORT_IFINDEX, version), OID_BASEPORT_IFINDEX)
+        nm = _ifname_map(snmp_walk(sock, target, community, OID_IFNAME, version), OID_IFNAME)
+        if not nm:
+            nm = _ifname_map(snmp_walk(sock, target, community, OID_IFDESCR, version), OID_IFDESCR)
         sarp = _switch_arp_map(snmp_walk(sock, target, community, OID_ARP, version), OID_ARP)
+        name = None
+        vb = snmp_walk(sock, target, community, OID_SYSNAME, version, limit=1)
+        if vb:
+            try:
+                name = vb[0][2].decode("utf-8", "replace").strip() or None
+            except Exception:
+                name = None
     finally:
         sock.close()
 
-    for ip, mac in sarp.items():
-        arp.setdefault(ip, mac)
+    fdb = dict(d)
+    fdb.update(q)                    # q-bridge prioritaire sur d-bridge
+    portcount = {}
+    for p in fdb.values():
+        portcount[p] = portcount.get(p, 0) + 1
+    return {"ip": ip, "fdb": fdb, "bp": bp, "nm": nm, "arp": sarp,
+            "name": name, "portcount": portcount}
 
-    if not (q_fdb or d_fdb):
-        print("[SNMP] Aucune table de commutation lue (mauvaise communaute, "
-              "SNMP desactive, ou pas de bridge-MIB). Port de switch ignore.",
-              file=sys.stderr)
+
+def discover_switches(candidates, community, version, timeout, workers=40):
+    """Trouve les IP qui repondent en SNMP ET exposent une bridge-MIB (= switches)."""
+    def probe(ip):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        try:
+            if snmp_walk(sock, (ip, 161), community, OID_BASEPORT_IFINDEX, version, limit=1, retries=0):
+                return ip
+            if snmp_walk(sock, (ip, 161), community, OID_Q_FDB, version, limit=1, retries=0):
+                return ip
+        except Exception:
+            return None
+        finally:
+            sock.close()
+        return None
+
+    found = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for res in ex.map(probe, candidates):
+            if res:
+                found.append(res)
+    return found
+
+
+def do_snmp(switch_ips, discover_ranges, community, version, timeout, records):
+    prime_arp([r["addr"] for r in records])
+    arp = local_arp()
+
+    switches = list(dict.fromkeys(switch_ips or []))
+    if discover_ranges:
+        cand = []
+        for r in discover_ranges:
+            cand += expand_range(r)
+        cand = list(dict.fromkeys(cand))
+        print("[SNMP] Decouverte de switches sur %d adresse(s)..." % len(cand), file=sys.stderr)
+        disc = discover_switches(cand, community, version, min(timeout, 1.0))
+        print("[SNMP] Switch(es) SNMP trouve(s): %s"
+              % (", ".join(disc) if disc else "aucun"), file=sys.stderr)
+        for ip in disc:
+            if ip not in switches:
+                switches.append(ip)
+
+    if not switches:
+        print("[SNMP] Aucun switch a interroger (ni --switch ni --discover concluant).", file=sys.stderr)
+        return
+
+    swdata = []
+    for ip in switches:
+        print("[SNMP] Lecture du switch %s ..." % ip, file=sys.stderr)
+        try:
+            data = read_switch(ip, community, version, timeout)
+        except Exception as e:
+            print("[SNMP]   erreur sur %s: %s" % (ip, e), file=sys.stderr)
+            data = None
+        if data:
+            swdata.append(data)
+            for k, v in data["arp"].items():
+                arp.setdefault(k, v)
+        else:
+            print("[SNMP]   %s ne fournit pas de table de commutation (ignore)." % ip, file=sys.stderr)
+
+    if not swdata:
+        print("[SNMP] Aucune table de commutation exploitable. Port de switch ignore.", file=sys.stderr)
         return
 
     found = 0
@@ -597,9 +674,22 @@ def do_snmp(switch, community, version, timeout, records):
         mac = arp.get(r["addr"])
         if not mac:
             continue
-        sp = resolve_switchport(mac, q_fdb, d_fdb, bp2if, if2name, switch)
-        if sp:
-            r["switchport"] = sp
+        # Cherche la MAC sur tous les switches ; retient le port "d'acces" =
+        # celui qui porte le MOINS de MAC (les liaisons/uplinks en agregent beaucoup).
+        best = None  # (portcount, data, port)
+        for data in swdata:
+            port = data["fdb"].get(mac)
+            if not port:
+                continue
+            cnt = data["portcount"].get(port, 1)
+            if best is None or cnt < best[0]:
+                best = (cnt, data, port)
+        if best:
+            _, data, port = best
+            ifidx = data["bp"].get(port, port)
+            name = data["nm"].get(ifidx) or ("port %d" % port)
+            label = ("%s (%s)" % (data["name"], data["ip"])) if data["name"] else data["ip"]
+            r["switchport"] = "%s · %s" % (label, name)
             found += 1
     print("[SNMP] Port de switch trouve pour %d appareil(s)." % found, file=sys.stderr)
 
@@ -622,7 +712,11 @@ def parse_args():
     p.add_argument("--timeout", type=float, default=4.0, help="Delai HTTP en secondes (defaut: 4).")
     p.add_argument("--workers", type=int, default=20, help="Analyses HTTP en parallele (defaut: 20).")
     # SNMP
-    p.add_argument("--switch", help="IP du switch pour lire le port via SNMP.")
+    p.add_argument("--switch", action="append",
+                   help="IP d'un switch a interroger en SNMP (repetable pour plusieurs switches).")
+    p.add_argument("--discover", action="append",
+                   help="Plage a scanner pour trouver AUTOMATIQUEMENT les switches SNMP "
+                        "(192.168.1.0/24...). Repetable. Evite d'avoir a connaitre l'IP du switch.")
     p.add_argument("--community", default="public", help="Communaute SNMP en lecture (defaut: public).")
     p.add_argument("--snmp-version", choices=["1", "2c"], default="2c", help="Version SNMP (defaut: 2c).")
     p.add_argument("--snmp-timeout", type=float, default=2.0, help="Delai SNMP en secondes (defaut: 2).")
@@ -653,10 +747,10 @@ def main():
                  re.match(r"^\d+\.\d+\.\d+\.\d+$", r["addr"]) else (r["addr"],))
     print("[HTTP] %d serveur(s) web ont repondu." % len(records), file=sys.stderr)
 
-    if args.switch:
+    if args.switch or args.discover:
         version = 1 if args.snmp_version == "2c" else 0
         try:
-            do_snmp(args.switch, args.community, version, args.snmp_timeout, records)
+            do_snmp(args.switch, args.discover, args.community, version, args.snmp_timeout, records)
         except Exception as e:
             print("[SNMP] Erreur: %s (port de switch ignore)." % e, file=sys.stderr)
 

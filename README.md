@@ -51,9 +51,19 @@ python analyseur.py --in surveillance-ip.json --out analyse.json
 python analyseur.py --range 192.168.1.0/24 --out analyse.json
 python analyseur.py --ips 192.168.1.10 192.168.1.20 --out analyse.json
 
-# En ajoutant le port de switch via SNMP :
+# En ajoutant le port de switch via SNMP (IP du switch connue) :
 python analyseur.py --in surveillance-ip.json --out analyse.json \
        --switch 192.168.1.2 --community public
+
+# SANS connaître l'IP du switch : découverte automatique des switches SNMP.
+# L'outil scanne la plage, trouve les switches et donne, pour chaque module,
+# le switch (nom + IP) ET le port :
+python analyseur.py --in surveillance-ip.json --out analyse.json \
+       --discover 192.168.1.0/24 --community public
+
+# Plusieurs switches connus : répète --switch.
+python analyseur.py --in surveillance-ip.json --out analyse.json \
+       --switch 192.168.1.253 --switch 192.168.1.254 --community public
 ```
 
 Puis, dans l'application : **Importer** → choisis `analyse.json`. Les libellés
@@ -67,8 +77,12 @@ type / `Server` / titre / port de switch s'affichent sur chaque carte.
 - La correspondance IP ↔ MAC vient de la table ARP de **la machine qui lance le
   script** (à exécuter depuis le même réseau/sous-réseau que les modules), et de
   la table ARP du switch s'il est routeur (L3).
-- Un module derrière un switch en cascade apparaît sur le port de liaison
-  (uplink) — comportement normal du niveau 2.
+- Avec plusieurs switches (`--switch` répété ou `--discover`), l'outil retient
+  automatiquement le **port d'accès** de chaque module (celui qui porte le moins
+  d'adresses MAC), pas les ports de liaison entre switches.
+- **Sans SNMP, c'est impossible** : depuis l'IP seule, on ne peut obtenir que la
+  MAC (via ARP), qui ne dit ni le switch ni le port. Le port est une donnée
+  physique que seul le switch connaît. Switches non-managés → à faire à la main.
 
 `python analyseur.py -h` affiche toutes les options.
 
