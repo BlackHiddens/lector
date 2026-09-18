@@ -23,6 +23,10 @@ Une page web autonome : **enregistre le fichier et ouvre-le en double-cliquant**
 > `Server` d'un autre appareil (règle de sécurité CORS), ni le port du switch.
 > C'est le rôle du second outil.
 
+> **Windows sans Python ?** Utilise `analyseur.ps1` (PowerShell, déjà présent
+> dans Windows, rien à installer) — mêmes fonctions que la version Python.
+> Voir la section 3 plus bas.
+
 ## 2. `analyseur.py` — l'analyse locale (Python, sans `pip`)
 
 Script en **pur Python 3** (bibliothèque standard uniquement, rien à installer).
@@ -67,3 +71,27 @@ type / `Server` / titre / port de switch s'affichent sur chaque carte.
   (uplink) — comportement normal du niveau 2.
 
 `python analyseur.py -h` affiche toutes les options.
+
+## 3. `analyseur.ps1` — même chose en PowerShell (Windows, sans Python)
+
+Version PowerShell de l'analyseur, pour Windows sans Python. **Rien à
+installer** (PowerShell est livré avec Windows).
+
+```powershell
+# 1) Vérifier que tout est bon (encodage SNMP, plages, détection) :
+powershell -ExecutionPolicy Bypass -File .\analyseur.ps1 -SelfTest
+
+# 2) Analyser (depuis l'export de l'app) + port de switch :
+powershell -ExecutionPolicy Bypass -File .\analyseur.ps1 -In surveillance-ip.json -Out analyse.json -Switch 192.168.1.2 -Community public
+
+# Ou depuis une plage / des IP :
+powershell -ExecutionPolicy Bypass -File .\analyseur.ps1 -Range 192.168.1.0/24 -Out analyse.json
+powershell -ExecutionPolicy Bypass -File .\analyseur.ps1 -Ips 192.168.1.10,192.168.1.20 -Out analyse.json
+```
+
+- `-ExecutionPolicy Bypass` autorise seulement ce lancement, sans rien changer
+  au réglage de ta machine.
+- Lance **`-SelfTest` en premier** : il vérifie en une seconde que l'encodage
+  SNMP et le reste fonctionnent sur ta machine avant de te fier au résultat.
+- Le JSON produit est identique à celui de la version Python : réimporte-le
+  dans l'application via **Importer**.
