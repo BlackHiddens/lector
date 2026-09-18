@@ -194,6 +194,18 @@
           <button id="bulkAdd" type="button">Ajouter la liste</button>
         </div>
       </div>
+
+      <div class="bulk">
+        <span class="field"><span style="font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">Ajouter une plage d'adresses</span></span>
+        <div class="row-flex" style="margin-top:8px">
+          <input type="text" id="rangePrefix" placeholder="Libellé (préfixe, option.)" style="flex:1 1 150px">
+          <input type="text" id="rangeStr" placeholder="192.168.1.1-254  ·  192.168.1.0/24" style="flex:2 1 240px">
+          <input type="number" id="rangePort" placeholder="port" min="1" max="65535" style="flex:0 1 90px">
+          <select id="rangeProto"><option value="http">http</option><option value="https">https</option></select>
+          <button id="rangeAdd" type="button" class="primary">Ajouter la plage</button>
+        </div>
+        <div class="hint">Formats : <code>192.168.1.1-254</code> (dernier octet) · <code>192.168.1.10-192.168.1.50</code> (début-fin) · <code>192.168.1.0/24</code> (CIDR). Maximum 512 adresses. Avec un préfixe, les libellés seront « Préfixe 192.168.1.x ».</div>
+      </div>
     </div>
   </details>
 
@@ -251,6 +263,53 @@
     return {addr:a, port:port};
   }
 
+  var MAX_RANGE=512;
+  function ipToInt(ip){
+    var p=String(ip).split('.'); if(p.length!==4) return null;
+    var n=0;
+    for(var i=0;i<4;i++){ var o=parseInt(p[i],10); if(isNaN(o)||o<0||o>255||!/^\d+$/.test(p[i])) return null; n=n*256+o; }
+    return n>>>0;
+  }
+  function intToIp(n){ return [(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255].join('.'); }
+  function fill(start,end){ var out=[]; for(var i=start;i<=end;i++) out.push(intToIp(i>>>0)); return out; }
+
+  // Développe "192.168.1.1-254", "192.168.1.10-192.168.1.50" ou "192.168.1.0/24"
+  function expandRange(input){
+    var s=String(input||'').trim(); if(!s) return {err:"Plage vide."};
+    var m;
+    // CIDR
+    if((m=s.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/))){
+      var base=ipToInt(m[1]); var bits=parseInt(m[2],10);
+      if(base==null||bits<0||bits>32) return {err:"CIDR invalide."};
+      var size=Math.pow(2,32-bits);
+      var mask=bits===0?0:(0xFFFFFFFF<<(32-bits))>>>0;
+      var net=(base & mask)>>>0;
+      var start=net, end=(net+size-1)>>>0;
+      if(bits<31){ start=(net+1)>>>0; end=(net+size-2)>>>0; } // on exclut réseau + broadcast
+      if(end-start+1>MAX_RANGE) return {err:"Plage trop grande ("+(end-start+1)+" adresses, max "+MAX_RANGE+")."};
+      return {ips:fill(start,end)};
+    }
+    // début-fin complet
+    if((m=s.match(/^(\d+\.\d+\.\d+\.\d+)\s*-\s*(\d+\.\d+\.\d+\.\d+)$/))){
+      var a=ipToInt(m[1]), b=ipToInt(m[2]);
+      if(a==null||b==null) return {err:"Adresses invalides."};
+      if(b<a){ var t=a;a=b;b=t; }
+      if(b-a+1>MAX_RANGE) return {err:"Plage trop grande ("+(b-a+1)+" adresses, max "+MAX_RANGE+")."};
+      return {ips:fill(a,b)};
+    }
+    // dernier octet: a.b.c.d-e
+    if((m=s.match(/^(\d+\.\d+\.\d+)\.(\d+)\s*-\s*(\d+)$/))){
+      var pre=m[1], lo=parseInt(m[2],10), hi=parseInt(m[3],10);
+      if(lo>255||hi>255) return {err:"Octet hors limites (0-255)."};
+      if(hi<lo){ var u=lo;lo=hi;hi=u; }
+      if(hi-lo+1>MAX_RANGE) return {err:"Plage trop grande, max "+MAX_RANGE+"."};
+      var out=[]; for(var k=lo;k<=hi;k++) out.push(pre+'.'+k); return {ips:out};
+    }
+    // adresse unique
+    if(ipToInt(s)!=null) return {ips:[s]};
+    return {err:"Format non reconnu. Ex : 192.168.1.1-254 ou 192.168.1.0/24"};
+  }
+
   /* ---------- reachability probe ---------- */
   function probe(url, timeoutMs){
     return new Promise(function(resolve){
@@ -302,13 +361,25 @@
     h.services=found; h.analyzing=false; saveHosts(); renderOne(h);
   }
 
+  // Exécute worker() sur chaque élément avec au plus `size` en parallèle.
+  async function runPool(items, worker, size){
+    var i=0;
+    async function next(){ while(i<items.length){ var idx=i++; await worker(items[idx]); } }
+    var runners=[]; var n=Math.min(size, items.length);
+    for(var k=0;k<n;k++) runners.push(next());
+    await Promise.all(runners);
+  }
+
   async function checkAll(){
-    var btn=document.getElementById('checkAll'); btn.disabled=true; btn.textContent='… en cours';
+    var btn=document.getElementById('checkAll'); btn.disabled=true;
     hosts.forEach(function(h){ h.status='pending'; });
     renderAll();
-    await Promise.all(hosts.map(function(h){ return checkHost(h,false); }));
-    renderAll(); updateStats();
-    setLast();
+    var total=hosts.length, done=0;
+    await runPool(hosts.slice(), async function(h){
+      await checkHost(h,true);
+      done++; btn.textContent = done<total ? ('… '+done+'/'+total) : '⟳ Vérifier tout';
+    }, 14);
+    updateStats(); setLast();
     btn.disabled=false; btn.textContent='⟳ Vérifier tout';
   }
 
@@ -425,6 +496,27 @@
     document.getElementById('bulk').value='';
     saveHosts(); renderAll();
     if(n) checkAll();
+  });
+
+  document.getElementById('rangeAdd').addEventListener('click',function(){
+    var r=expandRange(document.getElementById('rangeStr').value);
+    if(r.err){ alert(r.err); return; }
+    var prefix=document.getElementById('rangePrefix').value.trim();
+    var port=parseInt(document.getElementById('rangePort').value,10)||null;
+    var proto=document.getElementById('rangeProto').value;
+    if(r.ips.length>60 && !confirm('Ajouter '+r.ips.length+' adresses et les tester ? Cela peut prendre un moment.')) return;
+    var existing={}; hosts.forEach(function(h){ existing[h.addr+'|'+(h.port||'')]=true; });
+    var added=0;
+    r.ips.forEach(function(ip){
+      var key=ip+'|'+(port||'');
+      if(existing[key]) return; existing[key]=true;
+      hosts.push({id:uid(), label:prefix?prefix+' '+ip:'', addr:ip, port:port, proto:proto, status:'', ms:null});
+      added++;
+    });
+    document.getElementById('rangeStr').value='';
+    saveHosts(); renderAll();
+    if(added) checkAll();
+    else alert('Ces adresses sont déjà dans la liste.');
   });
 
   list.addEventListener('click',function(e){
