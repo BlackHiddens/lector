@@ -426,6 +426,15 @@
     apiGet('api/mac?host='+host).then(function(r){
       if(r && r.mac && r.mac!==h.mac){ h.mac=r.mac; saveHosts(); renderOne(h); }
     }).catch(function(){});
+    engineFavicon(h);
+  }
+  // Récupère le VRAI favicon via le moteur (lit le <link rel=icon>, y compris
+  // chemins exotiques) et le stocke en data-URI -> remplace l'icône par défaut.
+  function engineFavicon(h){
+    return apiGet('api/favicon?host='+encodeURIComponent(hostOnly(h))+'&port='+(h.port||'')+'&proto='+(h.proto||'http')).then(function(r){
+      if(r && r.dataUri && r.dataUri!==h.favicon){ h.favicon=r.dataUri; saveHosts(); renderOne(h); return true; }
+      return false;
+    }).catch(function(){ return false; });
   }
 
   /* ---------- identification détaillée (moteur) ---------- */
@@ -444,8 +453,13 @@
     } else {
       h+='<div style="margin-bottom:12px; color:var(--muted)">Aucune marque reconnue automatiquement. Regarde les indices ci-dessous — le titre est souvent le meilleur repère.</div>';
     }
+    var top='';
+    if(idHost && idHost.favicon){ top='<div style="text-align:center;margin-bottom:10px"><img src="'+esc(idHost.favicon)+'" alt="" style="width:44px;height:44px;object-fit:contain;border:1px solid var(--border);border-radius:8px;padding:4px;background:var(--panel-2)"><div style="font-size:.75rem;color:var(--muted);margin-top:3px">icône du module</div></div>'; }
     if(r.title){ h+='<div style="margin-bottom:10px"><button class="icon" data-setlabel="'+esc(r.title)+'">Utiliser le titre comme libellé</button></div>'; }
     h+=row('Titre de la page', r.title);
+    h+=row('Titre principal (h1)', r.h1);
+    h+=row('Modèle (probable)', r.model);
+    h+=row('Firmware / version', r.version);
     h+=row('En-tête Server', r.server);
     h+=row('Type détecté', r.detected);
     h+=row('X-Powered-By', r.powered);
@@ -455,7 +469,7 @@
     h+=row('URL finale', r.finalUrl);
     h+=row('Statut HTTP', r.status);
     if(cookies.length) h+=row('Cookies', cookies.join(', '));
-    return h;
+    return top+h;
   }
 
   async function identify(h){
@@ -471,6 +485,8 @@
       if(r.detected) h.detected=r.detected;
       saveHosts(); renderOne(h);
       showModal(buildIdHtml(r));
+      // récupère l'icône puis rafraîchit la fenêtre pour l'afficher
+      engineFavicon(h).then(function(ok){ if(ok && idHost===h){ showModal(buildIdHtml(r)); } });
     }catch(e){ showModal('<div>Échec de l\'identification.</div>'); }
   }
 
@@ -492,8 +508,7 @@
       h.ups = (h.ups||0)+1;                    // contrôles réussis
       h.lastUp = Date.now();                   // dernière réponse
       h.samples = (h.samples||[]).concat(res.ms).slice(-20);  // historique latence
-      tryFavicon(h);
-      if(ENGINE) engineEnrich(h);
+      if(ENGINE){ engineEnrich(h); } else { tryFavicon(h); }
     }
     saveHosts(); if(render){ renderOne(h); updateStats(); }
     return res.up;

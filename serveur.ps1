@@ -151,6 +151,62 @@ function Do-Http([string]$hostname,[int]$port,[string]$proto,[int]$timeoutMs=400
     return @{ up=$ok; status=$status; server=$server.Trim(); realm=$realm; title=$title; detected=(Detect-Server $server.Trim() $realm $title) }
 }
 
+function Get-Bytes([string]$url,[int]$timeoutMs=4000){
+    try{
+        $req=[System.Net.HttpWebRequest]::Create($url)
+        $req.Method="GET"; $req.Timeout=$timeoutMs; $req.ReadWriteTimeout=$timeoutMs
+        $req.UserAgent="SurveillanceIP-Engine/1.0"; $req.AllowAutoRedirect=$true
+        $resp=$null
+        try{ $resp=$req.GetResponse() } catch [System.Net.WebException]{ $resp=$_.Exception.Response; if($null -eq $resp){ return $null } }
+        $ct=[string]$resp.Headers["Content-Type"]
+        $stream=$resp.GetResponseStream(); $ms=[System.IO.MemoryStream]::new(); $buf=[byte[]]::new(8192); $tot=0
+        while($tot -lt 300000){ $rd=$stream.Read($buf,0,$buf.Length); if($rd -le 0){break}; $ms.Write($buf,0,$rd); $tot+=$rd }
+        $resp.Close()
+        return @{ bytes=$ms.ToArray(); ctype=$ct }
+    }catch{ return $null }
+}
+function Guess-Mime([byte[]]$b){
+    if($b.Length -ge 2 -and $b[0] -eq 0x89 -and $b[1] -eq 0x50){ return 'image/png' }
+    if($b.Length -ge 3 -and $b[0] -eq 0x47 -and $b[1] -eq 0x49 -and $b[2] -eq 0x46){ return 'image/gif' }
+    if($b.Length -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xD8){ return 'image/jpeg' }
+    if($b.Length -ge 4 -and $b[0] -eq 0x00 -and $b[1] -eq 0x00 -and $b[2] -eq 0x01 -and $b[3] -eq 0x00){ return 'image/x-icon' }
+    if($b.Length -ge 2 -and $b[0] -eq 0x42 -and $b[1] -eq 0x4D){ return 'image/bmp' }
+    $head=[System.Text.Encoding]::ASCII.GetString($b,0,[Math]::Min(300,$b.Length)).ToLower()
+    if($head -match '<svg'){ return 'image/svg+xml' }
+    return 'application/octet-stream'
+}
+function Looks-Image([byte[]]$b,[string]$ct){
+    if($ct -and $ct -match 'image/'){ return $true }
+    return ((Guess-Mime $b) -ne 'application/octet-stream')
+}
+
+# Lit la page, trouve le VRAI favicon (y compris <link rel=icon href=...>),
+# recupere ses octets et renvoie une data-URI directement affichable.
+function Do-Favicon([string]$hostname,[int]$port,[string]$proto,[int]$timeoutMs=4000){
+    if(-not $proto){ $proto='http' }
+    $base = "$proto`://$hostname" + $(if($port -gt 0){ ":$port" } else { "" }) + "/"
+    $cands = New-Object System.Collections.Generic.List[string]
+    $page = Get-Bytes $base $timeoutMs
+    if($page -and $page.bytes){
+        $html=[System.Text.Encoding]::UTF8.GetString($page.bytes)
+        foreach($m in [regex]::Matches($html,'(?is)<link\b[^>]*rel\s*=\s*["''][^"'']*icon[^"'']*["''][^>]*>')){
+            $hm=[regex]::Match($m.Value,'(?is)href\s*=\s*["'']([^"'']+)["'']')
+            if($hm.Success){ try{ [void]$cands.Add(([System.Uri]::new([System.Uri]$base,$hm.Groups[1].Value)).AbsoluteUri) }catch{} }
+        }
+    }
+    foreach($p in @('favicon.ico','favicon.png','favicon.gif','apple-touch-icon.png','logo.png')){ [void]$cands.Add($base+$p) }
+    $seen=@{}
+    foreach($u in $cands){
+        if($seen.ContainsKey($u)){ continue }; $seen[$u]=$true
+        $r=Get-Bytes $u $timeoutMs
+        if($r -and $r.bytes -and $r.bytes.Length -gt 20 -and (Looks-Image $r.bytes $r.ctype)){
+            $mime = if($r.ctype -and $r.ctype -match 'image/'){ (($r.ctype -split ';')[0]).Trim() } else { Guess-Mime $r.bytes }
+            return @{ dataUri=("data:$mime;base64,"+[System.Convert]::ToBase64String($r.bytes)); href=$u }
+        }
+    }
+    return @{}
+}
+
 function Do-Identify([string]$hostname,[int]$port,[string]$proto,[int]$timeoutMs=5000){
     if(-not $proto){ $proto='http' }
     $url = "$proto`://$hostname" + $(if($port -gt 0){ ":$port" } else { "" }) + "/"
@@ -177,6 +233,9 @@ function Do-Identify([string]$hostname,[int]$port,[string]$proto,[int]$timeoutMs
         if($body -match '(?is)<title[^>]*>(.*?)</title>'){ $t=($matches[1] -replace '\s+',' ').Trim(); if($t.Length -gt 120){$t=$t.Substring(0,120)}; $res.title=$t }
         if($body -match '(?is)<meta[^>]+name=["'']?generator["'']?[^>]+content=["'']([^"'']+)'){ $res.generator=$matches[1].Trim() }
         if($body -match '(?is)<meta[^>]+name=["'']?description["'']?[^>]+content=["'']([^"'']+)'){ $d=$matches[1].Trim(); if($d.Length -gt 160){$d=$d.Substring(0,160)}; $res.description=$d }
+        if($body -match '(?is)<h1[^>]*>(.*?)</h1>'){ $h1=($matches[1] -replace '<[^>]+>','' -replace '\s+',' ').Trim(); if($h1.Length -gt 90){$h1=$h1.Substring(0,90)}; if($h1){ $res.h1=$h1 } }
+        if($body -match '(?im)\b(model|mod.le|product)\b[^\w]{0,3}[:=]?\s*([A-Za-z0-9][A-Za-z0-9._\-/ ]{1,28})'){ $res.model=$matches[2].Trim() }
+        if($body -match '(?im)\b(firmware|version|fw)\b[^\w]{0,3}[:=]?\s*([Vv]?[0-9][0-9A-Za-z._\-]{1,20})'){ $res.version=$matches[2].Trim() }
         $sample = if($body.Length -gt 8000){ $body.Substring(0,8000) } else { $body }
         $hay = (("{0} {1} {2} {3} {4} {5} {6}" -f $res.server,$res.powered,$res.realm,$res.title,$res.generator,$res.description,$res.finalUrl) + " " + $sample).ToLower()
         $res.detected = Detect-Server $res.server $res.realm $res.title
@@ -299,6 +358,10 @@ while($true){
         elseif($path -eq "/api/identify"){
             $port=0; [int]::TryParse([string]$q['port'],[ref]$port) | Out-Null
             Send-Json $stream (Do-Identify ([string]$q['host']) $port ([string]$q['proto']) 5000)
+        }
+        elseif($path -eq "/api/favicon"){
+            $port=0; [int]::TryParse([string]$q['port'],[ref]$port) | Out-Null
+            Send-Json $stream (Do-Favicon ([string]$q['host']) $port ([string]$q['proto']) 4000)
         }
         elseif($path -eq "/api/mac"){ Send-Json $stream @{ mac=(Do-Mac ([string]$q['host'])) } }
         elseif($path -eq "/api/ports"){ Send-Json $stream @{ services=(Do-Ports ([string]$q['host'])) } }
