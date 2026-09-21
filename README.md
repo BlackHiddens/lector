@@ -134,3 +134,27 @@ powershell -ExecutionPolicy Bypass -File .\analyseur.ps1 -Ips 192.168.1.10,192.1
   SNMP et le reste fonctionnent sur ta machine avant de te fier au résultat.
 - Le JSON produit est identique à celui de la version Python : réimporte-le
   dans l'application via **Importer**.
+
+## 4. Mode « moteur local » — `serveur.ps1` + `Lancer.bat` (recommandé, sans installation)
+
+Le navigateur seul est bridé (CORS, pas de ping ICMP, pas de MAC…). Le **moteur
+local** lève ces limites : un petit serveur PowerShell tourne sur ta machine,
+sert l'interface et fait tout le travail réseau **en local**.
+
+**Lancement (exécution simple) :** double-clic sur **`Lancer.bat`**.
+Le navigateur s'ouvre sur `http://127.0.0.1:8899/`, avec le badge
+**« ⚙ Moteur local actif »**. Pour arrêter : ferme la fenêtre PowerShell.
+
+Placer dans le **même dossier** : `serveur.ps1`, `Lancer.bat` et `index.html`.
+
+En mode moteur, l'app récupère automatiquement et **en direct** :
+- **ping ICMP réel** (statut + latence),
+- le **titre** de la page et l'en-tête **`Server`** → type de module,
+- l'**adresse MAC** (utile pour la réservation DHCP),
+- les **ports/services** ouverts.
+
+Vérifier que les briques marchent : `powershell -ExecutionPolicy Bypass -File .\serveur.ps1 -SelfTest`
+
+> Le port de switch (SNMP) et les réservations DHCP restent fournis par
+> `analyseur.py`/`analyseur.ps1` et `dhcp.ps1` (import du JSON) — on pourra les
+> intégrer au moteur dans un second temps.

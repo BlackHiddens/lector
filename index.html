@@ -139,7 +139,10 @@
       <h1>Surveillance IP</h1>
       <p class="sub">Vérifie si tes adresses répondent, devine ce qu'il y a derrière, et ouvre leur page web d'un clic.</p>
     </div>
-    <button class="theme-btn" id="themeBtn" title="Changer de thème">◐ Thème</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="badge" id="engineBadge" title="Le moteur local serveur.ps1 fournit ping ICMP, titre, Server et MAC" style="display:none;color:var(--up);border-color:color-mix(in srgb,var(--up) 45%,var(--border))"></span>
+      <button class="theme-btn" id="themeBtn" title="Changer de thème">◐ Thème</button>
+    </div>
   </header>
 
   <div class="stats">
@@ -241,7 +244,8 @@
       <li>Un navigateur ne peut pas faire de vrai <i>ping</i> (ICMP). Le test consiste à <b>ouvrir une connexion web</b> vers l'adresse : si l'appareil répond sur ce port, il est marqué « Répond ».</li>
       <li>Un appareil <b>allumé mais sans page web</b> sur le port testé apparaîtra « Sans réponse ». Ajuste le port si besoin.</li>
       <li>Ce que l'app récupère <b>toute seule</b> (maximum autorisé au navigateur) : statut, <b>latence</b> (dernière + moyenne), <b>disponibilité %</b>, <b>dernière fois vu</b>, <b>icône/favicon</b>, et les <b>services web</b> ouverts (ports http/https) via <b>Analyser tout</b> ou la case <b>sonde auto</b>.</li>
-      <li>Ce qui reste <b>impossible depuis le navigateur</b> (règle de sécurité CORS) : lire le <b>titre</b> de la page, l'en-tête <code>Server</code>, la <b>MAC</b> et le <b>port de switch</b>. Ces infos-là ne sont accessibles qu'avec l'<b>analyseur local</b> (ci-dessous).</li>
+      <li><b>Mode moteur local</b> (recommandé) : lance <code>Lancer.bat</code> (qui démarre <code>serveur.ps1</code>). L'interface s'ouvre alors via <code>http://127.0.0.1</code> et récupère <b>en direct</b>, sans limite : <b>ping ICMP</b> réel, <b>titre</b> de page, en-tête <code>Server</code>, <b>adresse MAC</b> et ports. Le badge « ⚙ Moteur local actif » s'affiche en haut.</li>
+      <li>Sans le moteur (fichier ouvert seul), le navigateur <b>interdit</b> (CORS) de lire le titre, l'en-tête <code>Server</code>, la MAC et le port de switch : on se limite alors aux indices (favicon, ports) et à l'analyseur en terminal.</li>
       <li>Pour une <b>vraie</b> identification automatique (titre, en-tête <code>Server</code>, type de serveur embarqué), utilise l'<b>analyseur local</b> fourni à part : il génère un JSON que tu réinjectes ici via <b>Importer</b> (les libellés se remplissent tout seuls, sans doublon).</li>
       <li>Champ <b>Notes</b> (bouton ✎) : pour tes infos manuelles — port du switch, emplacement, n° de série. Conservé à l'export/import.</li>
       <li><b>Enregistrer / partager</b> : le bouton <b>💾 Enregistrer</b> télécharge un fichier <code>.html</code> <b>autonome contenant tes données</b> (libellés, notes, ports de switch, ordre). Envoie ce fichier à un collègue : il l'ouvre déjà rempli. Une <b>*</b> sur le bouton = modifications non enregistrées.</li>
@@ -387,9 +391,31 @@
 
   function timeout(){ return parseInt(document.getElementById('timeout').value,10)||3000; }
 
+  /* ---------- moteur local (serveur.ps1) ---------- */
+  var ENGINE=false;
+  function hostOnly(h){ return String(h.addr||'').replace(/:\d+$/,''); }
+  function apiGet(p){ return fetch(p,{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); }); }
+  async function enginePing(h){
+    try{ var r=await apiGet('api/ping?host='+encodeURIComponent(hostOnly(h))); return {up:!!r.up, ms:(r.ms==null?0:r.ms)}; }
+    catch(e){ return {up:false}; }
+  }
+  function engineEnrich(h){
+    var host=encodeURIComponent(hostOnly(h));
+    apiGet('api/http?host='+host+'&port='+(h.port||'')+'&proto='+(h.proto||'http')).then(function(r){
+      if(!r) return; var ch=false;
+      if(r.server){ h.server=r.server; ch=true; }
+      if(r.title){ h.title=r.title; ch=true; }
+      if(r.detected){ h.detected=r.detected; ch=true; }
+      if(ch){ saveHosts(); renderOne(h); }
+    }).catch(function(){});
+    apiGet('api/mac?host='+host).then(function(r){
+      if(r && r.mac && r.mac!==h.mac){ h.mac=r.mac; saveHosts(); renderOne(h); }
+    }).catch(function(){});
+  }
+
   async function checkHost(h, render){
     h.status='pending'; if(render) renderOne(h);
-    var res=await probe(baseUrl(h)+'/?_t='+Date.now(), timeout());
+    var res = ENGINE ? await enginePing(h) : await probe(baseUrl(h)+'/?_t='+Date.now(), timeout());
     h.status = res.up ? 'up' : 'down';
     h.ms = res.up ? res.ms : null;
     h.checked = Date.now();
@@ -399,6 +425,7 @@
       h.lastUp = Date.now();                   // dernière réponse
       h.samples = (h.samples||[]).concat(res.ms).slice(-20);  // historique latence
       tryFavicon(h);
+      if(ENGINE) engineEnrich(h);
     }
     saveHosts(); if(render){ renderOne(h); updateStats(); }
     return res.up;
@@ -423,7 +450,12 @@
 
   // Sonde les ports web courants -> liste "proto:port" des services qui répondent.
   async function analyze(h){
-    var found=[]; h.analyzing=true; renderOne(h);
+    h.analyzing=true; renderOne(h);
+    if(ENGINE){
+      try{ var r=await apiGet('api/ports?host='+encodeURIComponent(hostOnly(h))); h.services=(r&&r.services)||[]; }catch(e){}
+      h.analyzed=Date.now(); h.analyzing=false; saveHosts(); renderOne(h); return;
+    }
+    var found=[];
     for(var i=0;i<COMMON_PORTS.length;i++){
       var p=COMMON_PORTS[i];
       var proto=HTTPS_PORTS[p]?'https':'http';
@@ -512,6 +544,7 @@
     var resv = h.reserved===true
       ? '<span class="badge" title="'+esc('Réservée sur le DHCP'+(h.reservedMac?' — MAC '+h.reservedMac:'')+' (ne change pas)')+'" style="color:var(--up);border-color:color-mix(in srgb,var(--up) 45%,var(--border))">🔒 réservée</span>'
       : (h.reserved===false ? '<span class="badge" title="Adresse dynamique : peut changer au prochain bail DHCP">IP dynamique</span>' : '');
+    var macb = h.mac ? '<span class="badge" title="Adresse MAC (via le moteur local)">'+esc(h.mac)+'</span>' : '';
     var labelHtml = h.label
       ? '<span class="label">'+esc(h.label)+'</span>'
       : '<span class="label empty">sans libellé</span>';
@@ -526,6 +559,7 @@
           rt+
           seen+
           resv+
+          macb+
           avail+
           (h.analyzing?'<span class="badge pending">analyse…</span>':'')+
           ana+
@@ -790,6 +824,7 @@
       if(h.switchport) o.switchport=h.switchport;
       if(h.reserved!==undefined) o.reserved=h.reserved;
       if(h.reservedMac) o.reservedMac=h.reservedMac;
+      if(h.mac) o.mac=h.mac;
       if(h.server) o.server=h.server;
       if(h.title) o.title=h.title;
       if(h.detected) o.detected=h.detected;
@@ -812,7 +847,7 @@
       var port=x.port||n.port||null;
       var key=n.addr+'|'+(port||'');
       var h=idx[key];
-      var autoFields=['server','title','detected','switchport','reserved','reservedMac'];
+      var autoFields=['server','title','detected','switchport','reserved','reservedMac','mac'];
       if(h){
         if(x.proto) h.proto=x.proto;
         if(x.label && !h.label) h.label=x.label;              // n'écrase pas un libellé saisi à la main
@@ -887,15 +922,31 @@
     var st=loadSet(); st.theme=next; saveSet(st);
   });
 
+  /* ---------- détection du moteur local ---------- */
+  async function detectEngine(){
+    try{
+      var r=await fetch('api/health',{cache:'no-store'});
+      if(r.ok){ var j=await r.json(); if(j && j.engine){ ENGINE=true; } }
+    }catch(e){ ENGINE=false; }
+    var b=document.getElementById('engineBadge');
+    if(b){
+      if(ENGINE){ b.style.display=''; b.textContent='⚙ Moteur local actif'; }
+      else { b.style.display='none'; }
+    }
+    // en mode moteur, le blocage https n'existe plus
+    if(ENGINE){ var w=document.getElementById('httpsWarn'); if(w) w.style.display='none'; }
+  }
+
   /* ---------- init ---------- */
-  function init(){
+  async function init(){
     EMPTY_DEFAULT=empty.innerHTML;
     var st=loadSet();
     if(st.theme) document.documentElement.setAttribute('data-theme',st.theme);
     if(st.refresh) document.getElementById('refresh').value=st.refresh;
     if(st.timeout) document.getElementById('timeout').value=st.timeout;
     if(st.autoscan) document.getElementById('autoscan').checked=true;
-    if(location.protocol==='https:') document.getElementById('httpsWarn').style.display='block';
+    await detectEngine();
+    if(!ENGINE && location.protocol==='https:') document.getElementById('httpsWarn').style.display='block';
     loadHosts();
     // migrate: ensure ids
     hosts.forEach(function(h){ if(!h.id) h.id=uid(); });
