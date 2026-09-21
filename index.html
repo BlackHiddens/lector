@@ -40,7 +40,7 @@
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     line-height:1.5; -webkit-font-smoothing:antialiased;
   }
-  .wrap{max-width:1040px; margin:0 auto; padding:24px 16px 64px}
+  .wrap{max-width:none; margin:0 auto; padding:24px 24px 64px}
   header.top{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:18px}
   h1{font-size:1.5rem; margin:0 0 4px; letter-spacing:-.01em}
   .sub{color:var(--muted); margin:0; font-size:.92rem}
@@ -636,8 +636,9 @@
       '<span class="dot '+(h.status||'')+'"></span>'+
       favi+
       '<div class="main">'+
-        '<div class="label-line">'+labelHtml+' <span class="addr">'+esc(h.addr)+(h.port?':'+h.port:'')+'</span></div>'+
-        '<div class="meta">'+
+        '<div class="label-line">'+
+          labelHtml+
+          ' <span class="addr">'+esc(h.addr)+(h.port?':'+h.port:'')+'</span>'+
           '<span class="badge status '+(h.status||'')+'">'+statusLabel(h.status)+'</span>'+
           rt+
           seen+
