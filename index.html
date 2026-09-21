@@ -130,6 +130,14 @@
     .form-grid{grid-template-columns:1fr 1fr}
     .stat .n{font-size:1.3rem}
   }
+  .modal-back{position:fixed; inset:0; background:rgba(2,6,23,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50}
+  .modal{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); max-width:580px; width:100%; max-height:86vh; overflow:auto; box-shadow:var(--shadow)}
+  .modal-head{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel)}
+  .modal-body{padding:14px 16px}
+  .idrow{display:flex; gap:10px; padding:7px 0; border-bottom:1px dashed var(--border); font-size:.9rem}
+  .idrow .k{color:var(--muted); flex:0 0 140px}
+  .idrow .v{flex:1; word-break:break-word; font-family:ui-monospace,Menlo,monospace; font-size:.85rem}
+  .guess{display:inline-flex; gap:6px; align-items:center; margin:4px 8px 0 0}
 </style>
 </head>
 <body>
@@ -257,6 +265,13 @@
 </div>
 
 <!-- Données enregistrées DANS le fichier par le bouton « Enregistrer ». Ne pas éditer à la main. -->
+<div id="idModal" class="modal-back" style="display:none">
+  <div class="modal">
+    <div class="modal-head"><b id="idModalTitle">Identification</b><button class="icon" id="idModalClose" title="Fermer">✕</button></div>
+    <div class="modal-body" id="idModalBody"></div>
+  </div>
+</div>
+
 <script id="seedData" type="application/json">[]</script>
 
 <script>
@@ -412,6 +427,59 @@
       if(r && r.mac && r.mac!==h.mac){ h.mac=r.mac; saveHosts(); renderOne(h); }
     }).catch(function(){});
   }
+
+  /* ---------- identification détaillée (moteur) ---------- */
+  var idHost=null;
+  function showModal(html){ document.getElementById('idModalBody').innerHTML=html; document.getElementById('idModal').style.display='flex'; }
+  function hideModal(){ document.getElementById('idModal').style.display='none'; idHost=null; }
+  function asArray(x){ return x ? (Array.isArray(x)?x:[x]) : []; }
+
+  function buildIdHtml(r){
+    var guesses=asArray(r.guesses), cookies=asArray(r.cookies);
+    function row(k,v){ return (v!==undefined && v!==null && v!=='') ? '<div class="idrow"><span class="k">'+k+'</span><span class="v">'+esc(String(v))+'</span></div>' : ''; }
+    var h='';
+    if(guesses.length){
+      h+='<div style="margin-bottom:12px"><b>Hypothèses d\'équipement :</b><div style="margin-top:6px">'+
+        guesses.map(function(g){ return '<span class="guess"><span class="badge svc">'+esc(g)+'</span><button class="icon" data-setlabel="'+esc(g)+'">→ libellé</button></span>'; }).join('')+'</div></div>';
+    } else {
+      h+='<div style="margin-bottom:12px; color:var(--muted)">Aucune marque reconnue automatiquement. Regarde les indices ci-dessous — le titre est souvent le meilleur repère.</div>';
+    }
+    if(r.title){ h+='<div style="margin-bottom:10px"><button class="icon" data-setlabel="'+esc(r.title)+'">Utiliser le titre comme libellé</button></div>'; }
+    h+=row('Titre de la page', r.title);
+    h+=row('En-tête Server', r.server);
+    h+=row('Type détecté', r.detected);
+    h+=row('X-Powered-By', r.powered);
+    h+=row('Authentification', r.realm);
+    h+=row('Generator (meta)', r.generator);
+    h+=row('Description (meta)', r.description);
+    h+=row('URL finale', r.finalUrl);
+    h+=row('Statut HTTP', r.status);
+    if(cookies.length) h+=row('Cookies', cookies.join(', '));
+    return h;
+  }
+
+  async function identify(h){
+    if(!ENGINE){ alert("L'identification détaillée nécessite le moteur local (lance Lancer.bat)."); return; }
+    idHost=h;
+    document.getElementById('idModalTitle').textContent='Identification — '+(h.label||h.addr);
+    showModal('<div style="color:var(--muted)">Analyse de '+esc(h.addr)+'…</div>');
+    try{
+      var r=await apiGet('api/identify?host='+encodeURIComponent(hostOnly(h))+'&port='+(h.port||'')+'&proto='+(h.proto||'http'));
+      if(!r || !r.up){ showModal('<div>Appareil injoignable, ou il n\'expose pas de page web sur ce port.</div>'); return; }
+      if(r.server) h.server=r.server;
+      if(r.title) h.title=r.title;
+      if(r.detected) h.detected=r.detected;
+      saveHosts(); renderOne(h);
+      showModal(buildIdHtml(r));
+    }catch(e){ showModal('<div>Échec de l\'identification.</div>'); }
+  }
+
+  document.getElementById('idModalClose').addEventListener('click',hideModal);
+  document.getElementById('idModal').addEventListener('click',function(e){ if(e.target.id==='idModal') hideModal(); });
+  document.getElementById('idModalBody').addEventListener('click',function(e){
+    var b=e.target.closest('[data-setlabel]'); if(!b) return;
+    if(idHost){ idHost.label=b.getAttribute('data-setlabel'); markDirty(); saveHosts(); renderOne(idHost); hideModal(); }
+  });
 
   async function checkHost(h, render){
     h.status='pending'; if(render) renderOne(h);
@@ -572,6 +640,7 @@
         '<a class="btn open" href="'+esc(url)+'/" target="_blank" rel="noopener" title="Ouvrir la page web">↗ Ouvrir</a>'+
         '<button class="icon" data-act="check" title="Vérifier">⟳</button>'+
         '<button class="icon" data-act="analyze" title="Analyser les services web">🔍</button>'+
+        '<button class="icon" data-act="identify" title="Identifier l\'équipement (moteur local)">🪪</button>'+
         '<button class="icon" data-act="edit" title="Modifier">✎</button>'+
         '<button class="icon" data-act="del" title="Supprimer">✕</button>'+
       '</div>'+
@@ -710,6 +779,7 @@
     var act=btn.dataset.act;
     if(act==='check'){ checkHost(h,true); }
     else if(act==='analyze'){ analyze(h); }
+    else if(act==='identify'){ identify(h); }
     else if(act==='del'){
       if(!confirm('Supprimer « '+(h.label||h.addr)+' » ?')) return;
       hosts=hosts.filter(function(x){return x.id!==id;}); markDirty(); saveHosts(); renderAll();

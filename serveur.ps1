@@ -59,6 +59,48 @@ $SERVER_SIGNATURES = @(
     @('shelly','Shelly (IoT)'),
     @('httpd','httpd embarque (generique)')
 )
+# Signatures constructeur/produit (regex -> etiquette) pour l'identification
+$VENDOR_SIGS = @(
+    @('axis communications|/axis-cgi|\baxis\b','Camera Axis'),
+    @('hikvision|hik-connect|dvrdvs|/doc/page/login','Hikvision (camera/NVR)'),
+    @('dahua|/rpc2','Dahua (camera/NVR)'),
+    @('milesight','Camera Milesight'),
+    @('mobotix','Camera Mobotix'),
+    @('foscam','Camera Foscam'),
+    @('hanwha|wisenet','Camera Hanwha/Wisenet'),
+    @('moxa','Moxa (passerelle serie/ethernet)'),
+    @('\bwago\b','WAGO (automate)'),
+    @('siemens|simatic','Siemens SIMATIC'),
+    @('schneider|modicon','Schneider Electric'),
+    @('advantech','Advantech'),
+    @('beckhoff|twincat','Beckhoff'),
+    @('phoenix ?contact','Phoenix Contact'),
+    @('shelly','Shelly (IoT)'),
+    @('espressif|esp8266|esp32|esphome|tasmota','ESP / Tasmota (IoT)'),
+    @('sonoff','Sonoff (IoT)'),
+    @('ubiquiti|unifi|airos|edgeos|edgemax','Ubiquiti'),
+    @('mikrotik|routeros','MikroTik'),
+    @('synology|diskstation','Synology (NAS)'),
+    @('qnap','QNAP (NAS)'),
+    @('fritz.?box|avm','AVM FRITZ!Box'),
+    @('jetdirect|laserjet|officejet|/hp/device','Imprimante HP'),
+    @('\bcanon\b','Imprimante Canon'),
+    @('\bepson\b','Imprimante Epson'),
+    @('\bbrother\b','Imprimante Brother'),
+    @('\bzebra\b','Imprimante Zebra'),
+    @('\blexmark\b','Imprimante Lexmark'),
+    @('kyocera','Imprimante Kyocera'),
+    @('\bcisco\b','Cisco'),
+    @('aruba networks|arubaos','Aruba'),
+    @('netgear','Netgear'),
+    @('tp-?link','TP-Link'),
+    @('grandstream','VoIP Grandstream'),
+    @('yealink','VoIP Yealink'),
+    @('lantronix','Lantronix'),
+    @('crestron','Crestron'),
+    @('\bbosch\b','Bosch'),
+    @('honeywell','Honeywell')
+)
 $COMMON_PORTS = @(80,443,8080,8443,8000,8008,8888,81,88,7547,9000,10000,5000)
 $HTTPS_PORTS = @{443=$true;8443=$true;10000=$true}
 
@@ -107,6 +149,41 @@ function Do-Http([string]$hostname,[int]$port,[string]$proto,[int]$timeoutMs=400
         if($body -match '(?is)<title[^>]*>(.*?)</title>'){ $title=($matches[1] -replace '\s+',' ').Trim(); if($title.Length -gt 90){ $title=$title.Substring(0,90) } }
     }catch{ return @{ up=$false } }
     return @{ up=$ok; status=$status; server=$server.Trim(); realm=$realm; title=$title; detected=(Detect-Server $server.Trim() $realm $title) }
+}
+
+function Do-Identify([string]$hostname,[int]$port,[string]$proto,[int]$timeoutMs=5000){
+    if(-not $proto){ $proto='http' }
+    $url = "$proto`://$hostname" + $(if($port -gt 0){ ":$port" } else { "" }) + "/"
+    $res = @{ up=$false }
+    try{
+        $req=[System.Net.HttpWebRequest]::Create($url)
+        $req.Method="GET"; $req.Timeout=$timeoutMs; $req.ReadWriteTimeout=$timeoutMs
+        $req.UserAgent="SurveillanceIP-Engine/1.0"; $req.AllowAutoRedirect=$true
+        $resp=$null
+        try{ $resp=$req.GetResponse() } catch [System.Net.WebException]{ $resp=$_.Exception.Response; if($null -eq $resp){ return @{ up=$false } } }
+        $res.up=$true
+        try{ $res.status=[int]$resp.StatusCode }catch{}
+        try{ $res.finalUrl=$resp.ResponseUri.AbsoluteUri }catch{}
+        $server=[string]$resp.Headers["Server"]; $res.server=$server.Trim()
+        $res.powered=[string]$resp.Headers["X-Powered-By"]
+        $wa=[string]$resp.Headers["WWW-Authenticate"]; if($wa -match 'realm\s*=\s*"([^"]*)"'){ $res.realm=$matches[1] }
+        $cookies=@()
+        try{ foreach($c in @($resp.Headers.GetValues("Set-Cookie"))){ if($c -match '^\s*([^=;]+)='){ $cookies += $matches[1].Trim() } } }catch{}
+        $res.cookies=$cookies
+        $stream=$resp.GetResponseStream(); $ms=[System.IO.MemoryStream]::new(); $buf=[byte[]]::new(8192); $tot=0
+        while($tot -lt 60000){ $rd=$stream.Read($buf,0,$buf.Length); if($rd -le 0){break}; $ms.Write($buf,0,$rd); $tot+=$rd }
+        $resp.Close()
+        $body=[System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+        if($body -match '(?is)<title[^>]*>(.*?)</title>'){ $t=($matches[1] -replace '\s+',' ').Trim(); if($t.Length -gt 120){$t=$t.Substring(0,120)}; $res.title=$t }
+        if($body -match '(?is)<meta[^>]+name=["'']?generator["'']?[^>]+content=["'']([^"'']+)'){ $res.generator=$matches[1].Trim() }
+        if($body -match '(?is)<meta[^>]+name=["'']?description["'']?[^>]+content=["'']([^"'']+)'){ $d=$matches[1].Trim(); if($d.Length -gt 160){$d=$d.Substring(0,160)}; $res.description=$d }
+        $sample = if($body.Length -gt 8000){ $body.Substring(0,8000) } else { $body }
+        $hay = (("{0} {1} {2} {3} {4} {5} {6}" -f $res.server,$res.powered,$res.realm,$res.title,$res.generator,$res.description,$res.finalUrl) + " " + $sample).ToLower()
+        $res.detected = Detect-Server $res.server $res.realm $res.title
+        $g=@(); foreach($s in $VENDOR_SIGS){ if($hay -match $s[0]){ $g += $s[1] } }
+        $res.guesses = @($g | Select-Object -Unique)
+    }catch{ return @{ up=$false } }
+    return $res
 }
 
 function Do-Mac([string]$hostname){
@@ -218,6 +295,10 @@ while($true){
         elseif($path -eq "/api/http"){
             $port=0; [int]::TryParse([string]$q['port'],[ref]$port) | Out-Null
             Send-Json $stream (Do-Http ([string]$q['host']) $port ([string]$q['proto']) 4000)
+        }
+        elseif($path -eq "/api/identify"){
+            $port=0; [int]::TryParse([string]$q['port'],[ref]$port) | Out-Null
+            Send-Json $stream (Do-Identify ([string]$q['host']) $port ([string]$q['proto']) 5000)
         }
         elseif($path -eq "/api/mac"){ Send-Json $stream @{ mac=(Do-Mac ([string]$q['host'])) } }
         elseif($path -eq "/api/ports"){ Send-Json $stream @{ services=(Do-Ports ([string]$q['host'])) } }
