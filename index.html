@@ -648,9 +648,9 @@
           (h.analyzing?'<span class="badge pending">analyse…</span>':'')+
           ana+
           svc+
+          (h.switchport?'<span class="badge" title="Port de switch">🔌 '+esc(h.switchport)+'</span>':'')+
+          (h.notes?'<span class="badge" title="Notes">📝 '+esc(h.notes)+'</span>':'')+
         '</div>'+
-        (h.switchport?'<div class="notes">🔌 '+esc(h.switchport)+'</div>':'')+
-        (h.notes?'<div class="notes">📝 '+esc(h.notes)+'</div>':'')+
       '</div>'+
       '<div class="actions">'+
         '<a class="btn open" href="'+esc(url)+'/" target="_blank" rel="noopener" title="Ouvrir la page web">↗ Ouvrir</a>'+
