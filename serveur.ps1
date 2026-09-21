@@ -30,7 +30,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if(-not $HtmlFile){ $HtmlFile = Join-Path $PSScriptRoot "index.html" }
+# $PSScriptRoot est vide quand on lance le code sans fichier .ps1 (contournement
+# de la strategie d'execution) : on retombe alors sur le dossier courant.
+if(-not $HtmlFile){
+    $root = if($PSScriptRoot){ $PSScriptRoot } else { (Get-Location).Path }
+    $HtmlFile = Join-Path $root "index.html"
+}
 
 $SERVER_SIGNATURES = @(
     @('goahead|embedthis','GoAhead (serveur web embarque)'),
