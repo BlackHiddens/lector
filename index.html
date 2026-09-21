@@ -509,6 +509,9 @@
     var rt = rtParts.length ? '<span class="rt">'+rtParts.join(' · ')+'</span>' : '';
     var avail = h.checks ? '<span class="badge" title="Disponibilité sur '+h.checks+' contrôle(s)">dispo '+Math.round((h.ups||0)/h.checks*100)+'%</span>' : '';
     var seen = (h.status==='down'&&h.lastUp) ? '<span class="badge" title="Dernière réponse">vu '+since(h.lastUp)+'</span>' : '';
+    var resv = h.reserved===true
+      ? '<span class="badge" title="'+esc('Réservée sur le DHCP'+(h.reservedMac?' — MAC '+h.reservedMac:'')+' (ne change pas)')+'" style="color:var(--up);border-color:color-mix(in srgb,var(--up) 45%,var(--border))">🔒 réservée</span>'
+      : (h.reserved===false ? '<span class="badge" title="Adresse dynamique : peut changer au prochain bail DHCP">IP dynamique</span>' : '');
     var labelHtml = h.label
       ? '<span class="label">'+esc(h.label)+'</span>'
       : '<span class="label empty">sans libellé</span>';
@@ -522,6 +525,7 @@
           '<span class="badge status '+(h.status||'')+'">'+statusLabel(h.status)+'</span>'+
           rt+
           seen+
+          resv+
           avail+
           (h.analyzing?'<span class="badge pending">analyse…</span>':'')+
           ana+
@@ -547,6 +551,7 @@
       '<label class="field"><span>Port</span><input type="number" data-f="port" value="'+esc(h.port||'')+'" min="1" max="65535"></label>'+
       '<label class="field"><span>Protocole</span><select data-f="proto"><option value="http"'+(h.proto!=='https'?' selected':'')+'>http</option><option value="https"'+(h.proto==='https'?' selected':'')+'>https</option></select></label>'+
       '<label class="field" style="flex:1 1 48%"><span>Port de switch</span><input type="text" data-f="switchport" value="'+esc(h.switchport||'')+'" placeholder="ex. SW-01 · Gi1/0/12"></label>'+
+      '<label class="field" style="flex:0 0 auto"><span>Réservation DHCP</span><span style="display:inline-flex;gap:6px;align-items:center;height:36px"><input type="checkbox" data-f="reserved"'+(h.reserved?' checked':'')+'> IP réservée</span></label>'+
       '<label class="field" style="flex:1 1 100%"><span>Notes (emplacement, n° de série…)</span><input type="text" data-f="notes" value="'+esc(h.notes||'')+'" placeholder="ex. local technique — armoire B"></label>'+
       '<button class="primary" data-act="save">Enregistrer</button>'+
       '<button data-act="cancel">Annuler</button>'+
@@ -685,6 +690,7 @@
       h.proto=card.querySelector('[data-f="proto"]').value;
       h.notes=card.querySelector('[data-f="notes"]').value.trim();
       h.switchport=card.querySelector('[data-f="switchport"]').value.trim();
+      h.reserved=card.querySelector('[data-f="reserved"]').checked;
       h.favicon=null; h.services=null;
       card.classList.remove('editing');            // referme la ligne après enregistrement
       markDirty(); saveHosts(); renderOne(h); checkHost(h,true);
@@ -782,6 +788,8 @@
       var o={label:h.label,addr:h.addr,port:h.port,proto:h.proto};
       if(h.notes) o.notes=h.notes;
       if(h.switchport) o.switchport=h.switchport;
+      if(h.reserved!==undefined) o.reserved=h.reserved;
+      if(h.reservedMac) o.reservedMac=h.reservedMac;
       if(h.server) o.server=h.server;
       if(h.title) o.title=h.title;
       if(h.detected) o.detected=h.detected;
@@ -804,7 +812,7 @@
       var port=x.port||n.port||null;
       var key=n.addr+'|'+(port||'');
       var h=idx[key];
-      var autoFields=['server','title','detected','switchport'];
+      var autoFields=['server','title','detected','switchport','reserved','reservedMac'];
       if(h){
         if(x.proto) h.proto=x.proto;
         if(x.label && !h.label) h.label=x.label;              // n'écrase pas un libellé saisi à la main
