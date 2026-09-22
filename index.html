@@ -7,31 +7,34 @@
 <meta name="description" content="Surveille une liste d'adresses IP : répondent ou non, indice de l'appareil derrière, et accès direct à leur page web.">
 <style>
   :root{
-    --bg:#f4f6fb; --panel:#ffffff; --panel-2:#f8fafc; --border:#e2e8f0;
-    --text:#0f172a; --muted:#64748b; --muted-2:#94a3b8;
-    --accent:#2563eb; --accent-fg:#ffffff;
-    --up:#16a34a; --up-bg:#dcfce7; --down:#dc2626; --down-bg:#fee2e2;
-    --pending:#d97706; --pending-bg:#fef3c7; --unknown:#64748b; --unknown-bg:#e2e8f0;
-    --shadow:0 1px 2px rgba(15,23,42,.06), 0 4px 16px rgba(15,23,42,.06);
-    --radius:14px;
+    --bg:#f6f8fc; --panel:#ffffff; --panel-2:#f5f7fb; --border:#e6eaf2;
+    --text:#111827; --muted:#5b6472; --muted-2:#98a2b3;
+    --accent:#4f46e5; --accent-fg:#ffffff;
+    --up:#12a150; --up-bg:#e7f6ee; --down:#e5484d; --down-bg:#fdecec;
+    --pending:#d97706; --pending-bg:#fdf1de; --unknown:#98a2b3; --unknown-bg:#eceff4;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-hover:0 4px 20px rgba(16,24,40,.10);
+    --radius:12px;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
-      --bg:#0b1120; --panel:#111827; --panel-2:#0f172a; --border:#1f2a3c;
-      --text:#e5e7eb; --muted:#94a3b8; --muted-2:#64748b;
-      --accent:#3b82f6; --accent-fg:#ffffff;
-      --up:#22c55e; --up-bg:#052e1b; --down:#f87171; --down-bg:#3b0d0d;
-      --pending:#fbbf24; --pending-bg:#3a2a06; --unknown:#94a3b8; --unknown-bg:#1f2a3c;
-      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+      --bg:#0a0e17; --panel:#111623; --panel-2:#0e1420; --border:#232b3a;
+      --text:#e8ebf1; --muted:#9aa4b4; --muted-2:#69748a;
+      --accent:#7c83ff; --accent-fg:#0a0e17;
+      --up:#3ecf8e; --up-bg:#0c2a1e; --down:#ff6169; --down-bg:#2e1416;
+      --pending:#f5b544; --pending-bg:#2f2410; --unknown:#69748a; --unknown-bg:#1a2130;
+      --shadow:0 1px 2px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
+      --shadow-hover:0 6px 26px rgba(0,0,0,.45);
     }
   }
   :root[data-theme="dark"]{
-    --bg:#0b1120; --panel:#111827; --panel-2:#0f172a; --border:#1f2a3c;
-    --text:#e5e7eb; --muted:#94a3b8; --muted-2:#64748b;
-    --accent:#3b82f6; --accent-fg:#ffffff;
-    --up:#22c55e; --up-bg:#052e1b; --down:#f87171; --down-bg:#3b0d0d;
-    --pending:#fbbf24; --pending-bg:#3a2a06; --unknown:#94a3b8; --unknown-bg:#1f2a3c;
-    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    --bg:#0a0e17; --panel:#111623; --panel-2:#0e1420; --border:#232b3a;
+    --text:#e8ebf1; --muted:#9aa4b4; --muted-2:#69748a;
+    --accent:#7c83ff; --accent-fg:#0a0e17;
+    --up:#3ecf8e; --up-bg:#0c2a1e; --down:#ff6169; --down-bg:#2e1416;
+    --pending:#f5b544; --pending-bg:#2f2410; --unknown:#69748a; --unknown-bg:#1a2130;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
+    --shadow-hover:0 6px 26px rgba(0,0,0,.45);
   }
   *{box-sizing:border-box}
   html,body{margin:0}
@@ -40,25 +43,26 @@
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     line-height:1.5; -webkit-font-smoothing:antialiased;
   }
-  .wrap{max-width:none; margin:0 auto; padding:24px 24px 64px}
-  header.top{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:18px}
-  h1{font-size:1.5rem; margin:0 0 4px; letter-spacing:-.01em}
-  .sub{color:var(--muted); margin:0; font-size:.92rem}
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 24px 72px}
+  header.top{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:22px}
+  h1{font-size:1.35rem; font-weight:650; margin:0 0 3px; letter-spacing:-.02em}
+  .sub{color:var(--muted); margin:0; font-size:.88rem}
   .theme-btn{background:var(--panel); color:var(--muted); border:1px solid var(--border); border-radius:10px; padding:8px 12px; cursor:pointer; font-size:.85rem}
   .theme-btn:hover{color:var(--text)}
 
-  .stats{display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px}
-  .stat{flex:1 1 120px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; box-shadow:var(--shadow)}
-  .stat .n{font-size:1.6rem; font-weight:700; line-height:1}
-  .stat .l{font-size:.78rem; color:var(--muted); margin-top:4px; text-transform:uppercase; letter-spacing:.04em}
+  .stats{display:flex; gap:12px; flex-wrap:wrap; margin:0 0 18px}
+  .stat{flex:1 1 130px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow)}
+  .stat .n{font-size:1.7rem; font-weight:680; line-height:1; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .stat .l{font-size:.7rem; color:var(--muted-2); margin-top:6px; text-transform:uppercase; letter-spacing:.07em; font-weight:600}
   .stat.up .n{color:var(--up)} .stat.down .n{color:var(--down)}
 
   .toolbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:12px; box-shadow:var(--shadow); margin-bottom:16px}
   .toolbar .grow{flex:1 1 auto}
-  button, .btn{font-family:inherit; font-size:.88rem; border-radius:10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); padding:9px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; text-decoration:none; white-space:nowrap}
-  button:hover, .btn:hover{border-color:var(--accent)}
-  button.primary{background:var(--accent); color:var(--accent-fg); border-color:var(--accent)}
-  button.primary:hover{filter:brightness(1.05)}
+  button, .btn{font-family:inherit; font-size:.86rem; font-weight:500; border-radius:9px; border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; text-decoration:none; white-space:nowrap; transition:border-color .12s, background .12s, box-shadow .12s, transform .05s}
+  button:hover, .btn:hover{border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); background:var(--panel-2)}
+  button:active, .btn:active{transform:translateY(1px)}
+  button.primary{background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:600}
+  button.primary:hover{background:var(--accent); filter:brightness(1.06)}
   button:disabled{opacity:.55; cursor:not-allowed}
   label.inline{display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.85rem}
   select, input[type=number], input[type=text]{font-family:inherit; font-size:.88rem; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text)}
@@ -73,7 +77,7 @@
   details.add>summary::before{content:"＋"; color:var(--accent); font-weight:700}
   details.add[open]>summary::before{content:"−"}
   .add-body{padding:4px 16px 16px; border-top:1px solid var(--border)}
-  .form-grid{display:grid; grid-template-columns:1.4fr 1.6fr .7fr .9fr auto; gap:10px; align-items:end; margin-top:12px}
+  .form-grid{display:grid; grid-template-columns:.8fr 1.3fr 1.5fr .6fr .8fr auto; gap:10px; align-items:end; margin-top:12px}
   .field{display:flex; flex-direction:column; gap:5px}
   .field span{font-size:.76rem; color:var(--muted); text-transform:uppercase; letter-spacing:.03em}
   .field input, .field select{width:100%}
@@ -81,8 +85,9 @@
   .bulk textarea{width:100%; min-height:76px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); resize:vertical}
   .hint{font-size:.78rem; color:var(--muted-2); margin-top:6px}
 
-  .list{display:flex; flex-direction:column; gap:12px}
-  .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 16px; display:flex; gap:14px; align-items:center; flex-wrap:wrap}
+  .list{display:flex; flex-direction:column; gap:10px}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:13px 16px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; transition:border-color .12s, box-shadow .12s}
+  .card:hover{border-color:color-mix(in srgb, var(--accent) 30%, var(--border)); box-shadow:var(--shadow-hover)}
   .card.is-down{border-color:color-mix(in srgb, var(--down) 40%, var(--border))}
   .card.dragging{opacity:.45}
   .card.dragover{outline:2px dashed var(--accent); outline-offset:2px}
@@ -95,27 +100,30 @@
   .dot.pending{background:var(--pending); box-shadow:0 0 0 4px var(--pending-bg); animation:pulse 1s ease-in-out infinite}
   @keyframes pulse{50%{opacity:.35}}
 
-  .favi{width:34px; height:34px; border-radius:8px; border:1px solid var(--border); background:var(--panel-2); object-fit:contain; padding:3px; flex:0 0 auto}
+  .favi{width:36px; height:36px; border-radius:9px; border:1px solid var(--border); background:var(--panel-2); object-fit:contain; padding:4px; flex:0 0 auto}
   .favi.placeholder{display:flex; align-items:center; justify-content:center; color:var(--muted-2); font-size:1rem}
 
   .main{flex:1 1 240px; min-width:200px}
-  .label-line{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
-  .label{font-weight:600; font-size:1rem}
+  .label-line{display:flex; align-items:center; gap:7px; flex-wrap:wrap; row-gap:6px}
+  .idchip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.7rem; font-weight:600; color:var(--muted); background:var(--panel-2); border:1px solid var(--border); border-radius:6px; padding:1px 6px; letter-spacing:.02em}
+  .label{font-weight:600; font-size:.98rem; letter-spacing:-.01em}
   .label.empty{color:var(--muted-2); font-weight:500; font-style:italic}
-  .addr{color:var(--muted); font-size:.85rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .addr{color:var(--muted); font-size:.82rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-right:2px}
   .notes{margin-top:6px; font-size:.82rem; color:var(--muted); background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:5px 9px; display:inline-block; max-width:100%}
   .meta{display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; align-items:center}
-  .badge{font-size:.74rem; padding:3px 8px; border-radius:999px; background:var(--panel-2); border:1px solid var(--border); color:var(--muted)}
-  .badge.status{font-weight:600}
-  .badge.up{background:var(--up-bg); color:var(--up); border-color:transparent}
-  .badge.down{background:var(--down-bg); color:var(--down); border-color:transparent}
-  .badge.pending{background:var(--pending-bg); color:var(--pending); border-color:transparent}
-  .badge.svc{background:transparent; border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); color:var(--accent)}
-  .rt{font-size:.78rem; color:var(--muted-2); font-variant-numeric:tabular-nums}
+  .badge{font-size:.72rem; font-weight:500; line-height:1.5; padding:2px 9px; border-radius:999px; background:color-mix(in srgb, var(--muted) 8%, transparent); border:1px solid transparent; color:var(--muted); white-space:nowrap}
+  .badge.status{font-weight:600; letter-spacing:.01em}
+  .badge.up{background:var(--up-bg); color:var(--up)}
+  .badge.down{background:var(--down-bg); color:var(--down)}
+  .badge.pending{background:var(--pending-bg); color:var(--pending)}
+  .badge.svc{background:color-mix(in srgb, var(--accent) 12%, transparent); color:var(--accent)}
+  .rt{font-size:.76rem; color:var(--muted-2); font-variant-numeric:tabular-nums; margin:0 2px}
 
-  .actions{display:flex; gap:7px; flex-wrap:wrap; align-items:center}
-  .actions .icon{padding:8px 10px}
-  .actions .open{background:var(--accent); color:var(--accent-fg); border-color:var(--accent)}
+  .actions{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-left:auto}
+  .actions .icon{padding:8px 10px; color:var(--muted)}
+  .actions .icon:hover{color:var(--text)}
+  .actions .open{background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:600}
+  .actions .open:hover{color:var(--accent-fg)}
 
   .edit-row{flex-basis:100%; display:none; gap:10px; flex-wrap:wrap; align-items:end; border-top:1px dashed var(--border); padding-top:12px; margin-top:2px}
   .card.editing .edit-row{display:flex}
@@ -196,6 +204,7 @@
     <summary>Ajouter une adresse</summary>
     <div class="add-body">
       <form id="addForm" class="form-grid" autocomplete="off">
+        <label class="field"><span>ID module</span><input type="text" id="fId" placeholder="MOD-014"></label>
         <label class="field"><span>Libellé</span><input type="text" id="fLabel" placeholder="ex. Caméra garage"></label>
         <label class="field"><span>Adresse IP / hôte</span><input type="text" id="fAddr" placeholder="192.168.1.10" required></label>
         <label class="field"><span>Port</span><input type="number" id="fPort" placeholder="80" min="1" max="65535"></label>
@@ -637,6 +646,7 @@
       favi+
       '<div class="main">'+
         '<div class="label-line">'+
+          (h.moduleId?'<span class="idchip" title="ID du module">#'+esc(h.moduleId)+'</span>':'')+
           labelHtml+
           ' <span class="addr">'+esc(h.addr)+(h.port?':'+h.port:'')+'</span>'+
           '<span class="badge status '+(h.status||'')+'">'+statusLabel(h.status)+'</span>'+
@@ -665,6 +675,7 @@
 
   function editRowHtml(h){
     return '<div class="edit-row">'+
+      '<label class="field" style="flex:0 1 130px"><span>ID du module</span><input type="text" data-f="moduleId" value="'+esc(h.moduleId||'')+'" placeholder="ex. MOD-014"></label>'+
       '<label class="field"><span>Libellé</span><input type="text" data-f="label" value="'+esc(h.label||'')+'" placeholder="ex. Imprimante bureau"></label>'+
       '<label class="field"><span>Adresse</span><input type="text" data-f="addr" value="'+esc(h.addr||'')+'"></label>'+
       '<label class="field"><span>Port</span><input type="number" data-f="port" value="'+esc(h.port||'')+'" min="1" max="65535"></label>'+
@@ -682,7 +693,7 @@
   function matchesFilter(h){
     if(filterStatus && h.status!==filterStatus) return false;
     if(filterText){
-      var hay=[h.addr, h.port, h.label, h.notes, h.switchport, h.server, h.title, h.detected]
+      var hay=[h.addr, h.port, h.moduleId, h.label, h.notes, h.switchport, h.server, h.title, h.detected, h.mac]
         .filter(Boolean).join(' ').toLowerCase();
       if(hay.indexOf(filterText)===-1) return false;
     }
@@ -745,7 +756,8 @@
     var ok=addHost(fLabel.value, fAddr.value, parseInt(fPort.value,10)||null, fProto.value);
     if(!ok){ fAddr.focus(); return; }
     var newH=hosts[hosts.length-1];
-    fLabel.value=''; fAddr.value=''; fPort.value='';
+    var idv=document.getElementById('fId').value.trim(); if(idv) newH.moduleId=idv;
+    document.getElementById('fId').value=''; fLabel.value=''; fAddr.value=''; fPort.value='';
     maybeSort(); saveHosts(); renderAll();
     checkHost(newH,true);
     fAddr.focus();
@@ -803,6 +815,7 @@
     else if(act==='edit'){ card.classList.add('editing'); var f=card.querySelector('[data-f="label"]'); if(f)f.focus(); }
     else if(act==='cancel'){ card.classList.remove('editing'); renderOne(h); }
     else if(act==='save'){
+      h.moduleId=card.querySelector('[data-f="moduleId"]').value.trim();
       h.label=card.querySelector('[data-f="label"]').value.trim();
       var n=normalizeAddr(card.querySelector('[data-f="addr"]').value);
       h.addr=n.addr;
@@ -906,6 +919,7 @@
   document.getElementById('exportBtn').addEventListener('click',function(){
     var data=hosts.map(function(h){
       var o={label:h.label,addr:h.addr,port:h.port,proto:h.proto};
+      if(h.moduleId) o.moduleId=h.moduleId;
       if(h.notes) o.notes=h.notes;
       if(h.switchport) o.switchport=h.switchport;
       if(h.reserved!==undefined) o.reserved=h.reserved;
@@ -937,11 +951,13 @@
       if(h){
         if(x.proto) h.proto=x.proto;
         if(x.label && !h.label) h.label=x.label;              // n'écrase pas un libellé saisi à la main
+        if(x.moduleId && !h.moduleId) h.moduleId=x.moduleId;
         if(x.notes!==undefined && x.notes!=='' && !h.notes) h.notes=x.notes;
         autoFields.forEach(function(f){ if(x[f]!==undefined && x[f]!=='') h[f]=x[f]; });
         updated++;
       }else{
         var nh={id:uid(), label:(x.label||'').trim(), addr:n.addr, port:port, proto:x.proto||'http', status:'', ms:null};
+        if(x.moduleId) nh.moduleId=x.moduleId;
         if(x.notes) nh.notes=x.notes;
         autoFields.forEach(function(f){ if(x[f]!==undefined) nh[f]=x[f]; });
         hosts.push(nh); idx[key]=nh; added++;
